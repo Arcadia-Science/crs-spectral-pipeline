@@ -1,0 +1,63 @@
+[project]
+name = "2026-chlorella-crs-phenotyping"
+version = "0.1.0"
+description = "Analysis pipelines associated with the pub: 'Designing coherent Raman imaging experiments for high-dimensional single-cell phenotyping in _Chlorella vulgaris_'"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "arcadia-microscopy-tools[all]>=0.3.1",
+    "jupyter>=1.1.1",
+    "plotly>=6.6.0",
+]
+
+[dependency-groups]
+dev = [
+    "pyright>=1.1.408",
+    "pytest>=9.0.2",
+    "ruff>=0.15.7",
+]
+
+[tool.pyright]
+exclude = [
+    "build",
+    "dist",
+    ".venv",
+    "**/__pycache__",
+    "**/node_modules",
+    ".*",
+    "src/data_hub_watchdogs/service.py",
+]
+
+[tool.ruff]
+# The directories to consider when resolving first- vs. third-party imports.
+src = ["."]
+line-length = 100
+indent-width = 4
+extend-include = ["*.ipynb"]
+
+[tool.ruff.lint.per-file-ignores]
+# Ignore star and unused imports.
+"__init__.py" = ["F403", "F405"]
+
+[tool.ruff.lint]
+select = [
+    "B",  # flake8-bugbear
+    "E",  # pycodestyle error
+    "F",  # pyflakes
+    "I",  # isort
+    "UP", # pyupgrade
+    "W",  # pycodestyle warning
+]
+ignore = []
+fixable = ["ALL"]
+unfixable = []
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+skip-magic-trailing-comma = false
+line-ending = "auto"
+
+[tool.ruff.lint.isort]
+order-by-type = true
+no-lines-before = ["future", "standard-library"]
