@@ -1,6 +1,6 @@
-# 2026-chlorella-crs-phenotyping
+# 2026-single-cell-crs-phenotyping
 
-Analysis pipelines associated with the pub: "Designing coherent Raman imaging experiments for high-dimensional single-cell phenotyping in _Chlorella vulgaris_."
+Analysis pipelines associated with the pub: "Designing coherent Raman imaging experiments for high-dimensional single-cell phenotyping."
 
 ## Purpose
 
@@ -10,8 +10,8 @@ Analysis pipelines associated with the pub: "Designing coherent Raman imaging ex
 This repository uses [uv](https://docs.astral.sh/uv/getting-started/installation/) to manage software environments and installations. Run the following commands to create the development environment:
 
 ```
-git clone https://github.com/Arcadia-Science/2026-chlorella-crs-phenotyping.git
-cd 2026-chlorella-crs-phenotyping
+git clone https://github.com/Arcadia-Science/2026-single-cell-crs-phenotyping.git
+cd 2026-single-cell-crs-phenotyping
 
 uv venv --python 3.12
 source .venv/bin/activate

@@ -1,7 +1,7 @@
 [project]
-name = "2026-chlorella-crs-phenotyping"
+name = "2026-single-cell-crs-phenotyping"
 version = "0.1.0"
-description = "Analysis pipelines associated with the pub: 'Designing coherent Raman imaging experiments for high-dimensional single-cell phenotyping in _Chlorella vulgaris_'"
+description = "Analysis pipelines associated with the pub: 'Designing coherent Raman imaging experiments for high-dimensional single-cell phenotyping'"
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
