@@ -76,7 +76,9 @@ def split_lif_file(
 
 @app.function(image=image, gpu="T4", volumes={"/s3": s3_mount}, max_containers=10)
 def segment_stack(s3_path: str) -> tuple[str, int]:
+    import pandas as pd
     import skimage as ski
+    from arcadia_microscopy_tools.masks import SegmentationMask
     from arcadia_microscopy_tools.model import SegmentationModel
     from arcadia_microscopy_tools.operations import subtract_background_dog
     from arcadia_microscopy_tools.pipeline import ImageOperation, PipelineParallelized
@@ -100,11 +102,26 @@ def segment_stack(s3_path: str) -> tuple[str, int]:
     total_cells = 0
     for i, frame in enumerate(preprocessed):
         mask = model.segment(frame)
-        n_cells = len(np.unique(mask)) - 1  # exclude background (0)
-        total_cells += n_cells
+        segmentation_mask = SegmentationMask(mask)
+        num_cells = segmentation_mask.num_cells
+        total_cells += num_cells
+
+        # Save overlay
+
+        # Save cell properties
+        cell_properties_um = segmentation_mask.convert_properties_to_microns(pixel_size_um=-1)
+        dataframe = pd.DataFrame.from_dict(cell_properties_um)
+        csv_path = Path(s3_path).with_stem(f"{Path(s3_path).stem}_{i}_measurements.csv")
+        with tempfile.NamedTemporaryFile(suffix=".csv", delete=False) as tmp:
+            dataframe.to_csv(tmp.name, index=False)
+            shutil.copy(tmp.name, csv_path)
+            Path(tmp.name).unlink()
+        print(f"Saved cell properties to {csv_path}")
+
+        # Append masks
         masks.append(mask)
         if i % 20 == 0:
-            print(f"  Frame {i}/{len(preprocessed)}: {n_cells} cells")
+            print(f"  Frame {i}/{len(preprocessed)}: {num_cells} cells")
 
     mask_stack = np.stack(masks).astype(np.uint16)
 
@@ -119,6 +136,7 @@ def segment_stack(s3_path: str) -> tuple[str, int]:
         f"Saved {Path(mask_path).name}: shape {mask_stack.shape}, total cells across frames: "
         f"{total_cells}"
     )
+
     return s3_path, total_cells
 
 
