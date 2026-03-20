@@ -26,12 +26,15 @@ def split_lif_file(
     m_range: tuple[int, int] | None = None,
     lambda_range: tuple[int, int] | None = None,
     channel_names: list[str] | None = None,
-) -> list[str]:
+) -> tuple[list[str], float]:
     from arcadia_microscopy_tools import MicroscopyImage
     from skimage.io import imsave
 
     full_lif_path = Path(f"/s3/{lif_path}")
     image = MicroscopyImage.from_lif_path(full_lif_path, image_name=image_name)
+
+    # Extract pixel size from image
+    pixel_size_um = image.metadata.instrument.channel_metadata_list[0].resolution.xy_step_um
 
     if channel_names is not None:
         channels = [ch for ch in image.channels if ch.name in channel_names]
@@ -71,11 +74,11 @@ def split_lif_file(
             print(f"Saved {filename} with shape {stack.shape}")
 
     print(f"\nSplit complete: {len(tiff_paths)} TIFF stacks saved to {output_dir}")
-    return tiff_paths
+    return tiff_paths, pixel_size_um
 
 
 @app.function(image=image, gpu="T4", volumes={"/s3": s3_mount}, max_containers=10)
-def segment_stack(s3_path: str) -> tuple[str, int]:
+def segment_stack(s3_path: str, pixel_size_um: float) -> tuple[str, int]:
     import pandas as pd
     import skimage as ski
     from arcadia_microscopy_tools.masks import SegmentationMask
@@ -109,7 +112,9 @@ def segment_stack(s3_path: str) -> tuple[str, int]:
         # Save overlay
 
         # Save cell properties
-        cell_properties_um = segmentation_mask.convert_properties_to_microns(pixel_size_um=-1)
+        cell_properties_um = segmentation_mask.convert_properties_to_microns(
+            pixel_size_um=pixel_size_um
+        )
         dataframe = pd.DataFrame.from_dict(cell_properties_um)
         csv_path = Path(s3_path).with_stem(f"{Path(s3_path).stem}_{i}_measurements.csv")
         with tempfile.NamedTemporaryFile(suffix=".csv", delete=False) as tmp:
@@ -155,17 +160,19 @@ def main():
     }
 
     # Crop configuration — set to None to use the full range
-    m_range = (0, 9)
-    lambda_range = None
+    m_range = (0, 1)  #  (0, 9)
+    lambda_range = (0, 1)  #  None
     channel_names = ["CARS"]
 
     for lif_path, image_name in lif_path_image_name_mapping.items():
         print(f"Splitting LIF: M={m_range}, Lambda={lambda_range}, channels={channel_names}")
-        tiff_paths = split_lif_file.remote(
+        tiff_paths, pixel_size_um = split_lif_file.remote(
             lif_path, image_name, m_range, lambda_range, channel_names
         )
         print(f"\nSegmenting {len(tiff_paths)} stacks in parallel...")
 
-        for path, cell_count in segment_stack.map(tiff_paths):
+        for path, cell_count in segment_stack.starmap(
+            [(path, pixel_size_um) for path in tiff_paths]
+        ):
             name = Path(path).name
             print(f"  {name}: {cell_count} total cells across all frames")
