@@ -124,18 +124,30 @@ def segment_stack(s3_path: str) -> tuple[str, int]:
 
 @app.local_entrypoint()
 def main():
-    lif_path = "The_Borg/Tara/2026-03-09/Chlorella_WT_TAP_slide2.lif"
-    image_name = "Lambda_1800_600_1pt0_Nav1"
+
+    lif_path_image_name_mapping = {
+        "The_Borg/Tara/2026-03-05/Chlorella_vulgaris_WT_Bristol_2026-03-05_slide1.lif": (
+            "Lambda_SRS_CARS_1800_600_1pt0_Nav1"
+        ),
+        "The_Borg/Tara/2026-03-05/Chlorella_vulgaris_WT_Bristol_2026-03-05_slide2.lif": (
+            "Lambda_SRS_CARS_1800_600_1pt0_Nav1"
+        ),
+        "The_Borg/Tara/2026-03-09/Chlorella_WT_TAP_slide1.lif": "Lambda_1800_600_1pt0_Nav2",
+        "The_Borg/Tara/2026-03-09/Chlorella_WT_TAP_slide2.lif": "Lambda_1800_600_1pt0_Nav1",
+    }
 
     # Crop configuration — set to None to use the full range
-    m_range = None
+    m_range = (0, 9)
     lambda_range = None
     channel_names = ["CARS"]
 
-    print(f"Splitting LIF: M={m_range}, Lambda={lambda_range}, channels={channel_names}")
-    tiff_paths = split_lif_file.remote(lif_path, image_name, m_range, lambda_range, channel_names)
-    print(f"\nSegmenting {len(tiff_paths)} stacks in parallel...")
+    for lif_path, image_name in lif_path_image_name_mapping.items():
+        print(f"Splitting LIF: M={m_range}, Lambda={lambda_range}, channels={channel_names}")
+        tiff_paths = split_lif_file.remote(
+            lif_path, image_name, m_range, lambda_range, channel_names
+        )
+        print(f"\nSegmenting {len(tiff_paths)} stacks in parallel...")
 
-    for path, cell_count in segment_stack.map(tiff_paths):
-        name = Path(path).name
-        print(f"  {name}: {cell_count} total cells across all frames")
+        for path, cell_count in segment_stack.map(tiff_paths):
+            name = Path(path).name
+            print(f"  {name}: {cell_count} total cells across all frames")
