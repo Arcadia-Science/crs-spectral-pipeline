@@ -120,7 +120,8 @@ def segment_stack(s3_path: str, pixel_size_um: float) -> tuple[str, int]:
             pixel_size_um=pixel_size_um
         )
         dataframe = pd.DataFrame.from_dict(cell_properties_um)
-        csv_path = Path(s3_path).with_stem(f"{Path(s3_path).stem}_{i}_measurements.csv")
+        stem = Path(s3_path).stem
+        csv_path = Path(s3_path).with_name(f"{stem}_{i}_measurements.csv")
         with tempfile.NamedTemporaryFile(suffix=".csv", delete=False) as tmp:
             dataframe.to_csv(tmp.name, index=False)
             shutil.copy(tmp.name, csv_path)
