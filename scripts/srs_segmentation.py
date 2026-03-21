@@ -68,7 +68,7 @@ def split_lif_file(
     print(f"Pixel size: {pixel_size_um} um/pixel")
 
     lif_parent = full_lif_path.parent
-    output_dir = lif_parent / "unpacked" / full_lif_path.stem / image_name
+    output_dir = lif_parent / "processed" / full_lif_path.stem / image_name
     output_dir.mkdir(parents=True, exist_ok=True)
 
     tiff_paths: list[str] = []
