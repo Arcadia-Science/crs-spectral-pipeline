@@ -239,14 +239,14 @@ def run_pipeline(
 
 
 @app.local_entrypoint()
-def main(run_mode: str = "blocking") -> None:
+def main() -> None:
     """Orchestrate LIF splitting and stack segmentation runs.
 
     For each configured LIF/image pair, this entrypoint first writes split TIFF
     stacks, then dispatches segmentation across stacks with Modal starmap.
 
-    Set `run_mode="detached"` to submit orchestration as a background Modal
-    job and return immediately.
+    Important: invoke with ``modal run --detach scripts/srs_segmentation.py``
+    so the Modal app stays alive after the local process exits.
     """
     lif_path_image_name_mapping: dict[str, str] = {
         "The_Borg/Tara/2026-03-05/Chlorella_WT_Bristol_slide1.lif": (
@@ -263,23 +263,12 @@ def main(run_mode: str = "blocking") -> None:
     lambda_range = None  # None for full lambda range
     channel_names = ["E-CARS"]
 
-    if run_mode not in {"blocking", "detached"}:
-        raise ValueError('run_mode must be one of: "blocking", "detached"')
-
-    if run_mode == "detached":
-        call = run_pipeline.spawn(
-            lif_path_image_name_mapping,
-            m_range,
-            lambda_range,
-            channel_names,
-        )
-        print("Submitted detached pipeline job.")
-        print(f"Function call id: {call.object_id}")
-        return
-
-    run_pipeline.remote(
+    call = run_pipeline.spawn(
         lif_path_image_name_mapping,
         m_range,
         lambda_range,
         channel_names,
     )
+    print("Submitted detached pipeline job.")
+    print("Run with: modal run --detach scripts/srs_segmentation.py")
+    print(f"Function call id: {call.object_id}")
