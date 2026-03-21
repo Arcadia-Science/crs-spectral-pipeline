@@ -47,7 +47,7 @@ def split_lif_file(
     print(f"Pixel size: {pixel_size_um} um/pixel")
 
     lif_parent = full_lif_path.parent
-    output_dir = lif_parent / "unpacked" / image_name
+    output_dir = lif_parent / "unpacked" / full_lif_path.stem / image_name
     output_dir.mkdir(parents=True, exist_ok=True)
 
     tiff_paths: list[str] = []
@@ -130,8 +130,7 @@ def segment_stack(s3_path: str, pixel_size_um: float) -> tuple[str, int]:
 
         # Append masks
         masks.append(mask)
-        if i % 20 == 0:
-            print(f"  Frame {i}/{len(preprocessed)}: {num_cells} cells")
+        print(f"  Frame {i}/{len(preprocessed)}: {num_cells} cells")
 
     mask_stack = np.stack(masks).astype(np.uint16)
 
