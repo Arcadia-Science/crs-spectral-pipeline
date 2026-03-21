@@ -1,6 +1,7 @@
 from __future__ import annotations
 import shutil
 import tempfile
+import traceback
 from pathlib import Path
 
 import modal
@@ -82,7 +83,10 @@ def split_lif_file(
 
 
 @app.function(image=image, gpu="T4", volumes={"/s3": s3_mount}, max_containers=10)
-def segment_stack(s3_path: str, pixel_size_um: float) -> tuple[str, int]:
+def segment_stack(
+    s3_path: str, pixel_size_um: float
+) -> tuple[str, int | None, str | None]:
+    """Returns (path, total_cells, error_message). error_message is None on success."""
     import pandas as pd
     import skimage as ski
     from arcadia_microscopy_tools.masks import SegmentationMask
@@ -91,62 +95,67 @@ def segment_stack(s3_path: str, pixel_size_um: float) -> tuple[str, int]:
     from arcadia_microscopy_tools.pipeline import ImageOperation, PipelineParallelized
     from skimage.io import imread, imsave
 
-    stack = imread(s3_path)  # (Lambda, Y, X)
-    print(f"Loaded {Path(s3_path).name}: shape {stack.shape}, dtype {stack.dtype}")
+    try:
+        stack = imread(s3_path)  # (Lambda, Y, X)
+        print(f"Loaded {Path(s3_path).name}: shape {stack.shape}, dtype {stack.dtype}")
 
-    preprocess = PipelineParallelized(
-        [
-            ImageOperation(ski.filters.gaussian, sigma=1.2),
-            ImageOperation(ski.exposure.equalize_adapthist, clip_limit=0.01),
-            ImageOperation(subtract_background_dog, percentile=10),
-        ],
-        preserve_dtype=False,
-    )
-    preprocessed = preprocess(stack)
-
-    model = SegmentationModel()
-    masks = []
-    total_cells = 0
-    for i, frame in enumerate(preprocessed):
-        mask = model.segment(frame)
-        segmentation_mask = SegmentationMask(mask)
-        num_cells = segmentation_mask.num_cells
-        total_cells += num_cells
-
-        # Save overlay
-
-        # Save cell properties
-        cell_properties_um = segmentation_mask.convert_properties_to_microns(
-            pixel_size_um=pixel_size_um
+        preprocess = PipelineParallelized(
+            [
+                ImageOperation(ski.filters.gaussian, sigma=1.2),
+                ImageOperation(ski.exposure.equalize_adapthist, clip_limit=0.01),
+                ImageOperation(subtract_background_dog, percentile=10),
+            ],
+            preserve_dtype=False,
         )
-        dataframe = pd.DataFrame.from_dict(cell_properties_um)
+        preprocessed = preprocess(stack)
+
+        model = SegmentationModel()
+        masks = []
+        total_cells = 0
+        for i, frame in enumerate(preprocessed):
+            mask = model.segment(frame)
+            segmentation_mask = SegmentationMask(mask)
+            num_cells = segmentation_mask.num_cells
+            total_cells += num_cells
+
+            # Save overlay
+
+            # Save cell properties
+            cell_properties_um = segmentation_mask.convert_properties_to_microns(
+                pixel_size_um=pixel_size_um
+            )
+            dataframe = pd.DataFrame.from_dict(cell_properties_um)
+            stem = Path(s3_path).stem
+            csv_path = Path(s3_path).with_name(f"{stem}_{i}_measurements.csv")
+            with tempfile.NamedTemporaryFile(suffix=".csv", delete=False) as tmp:
+                dataframe.to_csv(tmp.name, index=False)
+                shutil.copy(tmp.name, csv_path)
+                Path(tmp.name).unlink()
+            print(f"Saved cell properties to {csv_path}")
+
+            # Append masks
+            masks.append(mask)
+            print(f"  Frame {i}/{len(preprocessed)}: {num_cells} cells")
+
+        mask_stack = np.stack(masks).astype(np.uint16)
+
         stem = Path(s3_path).stem
-        csv_path = Path(s3_path).with_name(f"{stem}_{i}_measurements.csv")
-        with tempfile.NamedTemporaryFile(suffix=".csv", delete=False) as tmp:
-            dataframe.to_csv(tmp.name, index=False)
-            shutil.copy(tmp.name, csv_path)
+        mask_path = str(Path(s3_path).parent / f"{stem}_masks.tiff")
+        with tempfile.NamedTemporaryFile(suffix=".tiff", delete=False) as tmp:
+            imsave(tmp.name, mask_stack, check_contrast=False)
+            shutil.copy(tmp.name, mask_path)
             Path(tmp.name).unlink()
-        print(f"Saved cell properties to {csv_path}")
 
-        # Append masks
-        masks.append(mask)
-        print(f"  Frame {i}/{len(preprocessed)}: {num_cells} cells")
-
-    mask_stack = np.stack(masks).astype(np.uint16)
-
-    stem = Path(s3_path).stem
-    mask_path = str(Path(s3_path).parent / f"{stem}_masks.tiff")
-    with tempfile.NamedTemporaryFile(suffix=".tiff", delete=False) as tmp:
-        imsave(tmp.name, mask_stack, check_contrast=False)
-        shutil.copy(tmp.name, mask_path)
-        Path(tmp.name).unlink()
-
-    print(
-        f"Saved {Path(mask_path).name}: shape {mask_stack.shape}, total cells across frames: "
-        f"{total_cells}"
-    )
-
-    return s3_path, total_cells
+        print(
+            f"Saved {Path(mask_path).name}: shape {mask_stack.shape}, total cells across frames: "
+            f"{total_cells}"
+        )
+        return s3_path, total_cells, None
+    except Exception as e:
+        msg = f"{type(e).__name__}: {e}"
+        print(f"segment_stack failed for {s3_path}: {msg}")
+        traceback.print_exc()
+        return s3_path, None, msg
 
 
 @app.local_entrypoint()
@@ -169,14 +178,23 @@ def main():
     channel_names = ["E-CARS"]
 
     for lif_path, image_name in lif_path_image_name_mapping.items():
-        print(f"Splitting LIF: M={m_range}, Lambda={lambda_range}, channels={channel_names}")
-        tiff_paths, pixel_size_um = split_lif_file.remote(
-            lif_path, image_name, m_range, lambda_range, channel_names
-        )
-        print(f"\nSegmenting {len(tiff_paths)} stacks in parallel...")
+        try:
+            print(f"Splitting LIF: M={m_range}, Lambda={lambda_range}, channels={channel_names}")
+            tiff_paths, pixel_size_um = split_lif_file.remote(
+                lif_path, image_name, m_range, lambda_range, channel_names
+            )
+            print(f"\nSegmenting {len(tiff_paths)} stacks in parallel...")
 
-        for path, cell_count in segment_stack.starmap(
-            [(path, pixel_size_um) for path in tiff_paths]
-        ):
-            name = Path(path).name
-            print(f"  {name}: {cell_count} total cells across all frames")
+            for path, cell_count, err in segment_stack.starmap(
+                [(path, pixel_size_um) for path in tiff_paths]
+            ):
+                name = Path(path).name
+                if err is not None:
+                    print(f"  {name}: FAILED — {err}")
+                else:
+                    print(
+                        f"  {name}: {cell_count} total cells across all frames"
+                    )
+        except Exception as e:
+            print(f"Failed LIF {lif_path} ({image_name}): {type(e).__name__}: {e}")
+            traceback.print_exc()
