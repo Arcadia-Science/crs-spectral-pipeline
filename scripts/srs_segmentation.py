@@ -83,16 +83,18 @@ def split_lif_file(
 
 
 @app.function(image=image, gpu="T4", volumes={"/s3": s3_mount}, max_containers=10)
-def segment_stack(
-    s3_path: str, pixel_size_um: float
-) -> tuple[str, int | None, str | None]:
+def segment_stack(s3_path: str, pixel_size_um: float) -> tuple[str, int | None, str | None]:
     """Returns (path, total_cells, error_message). error_message is None on success."""
+    import numpy as np
     import pandas as pd
     import skimage as ski
+    from arcadia_microscopy_tools import Channel, overlay_channels
     from arcadia_microscopy_tools.masks import SegmentationMask
     from arcadia_microscopy_tools.model import SegmentationModel
     from arcadia_microscopy_tools.operations import subtract_background_dog
     from arcadia_microscopy_tools.pipeline import ImageOperation, PipelineParallelized
+    from arcadia_pycolor import HexCode
+    from cellpose.utils import masks_to_outlines
     from skimage.io import imread, imsave
 
     try:
@@ -118,14 +120,31 @@ def segment_stack(
             num_cells = segmentation_mask.num_cells
             total_cells += num_cells
 
+            # Create overlay
+            mask_channel = Channel("mask", color=HexCode("", "#ffff00"))
+            mask_outlines = masks_to_outlines(segmentation_mask.label_image)
+            overlay_rgb_float = overlay_channels(
+                frame, channel_intensities={mask_channel: mask_outlines}
+            )
+            overlay_rgb_uint8 = ski.exposure.rescale_intensity(
+                overlay_rgb_float,
+                out_range=np.uint8,  # pyright: ignore[reportArgumentType]
+            )
             # Save overlay
+            stem = Path(s3_path).stem
+            jpg_path = Path(s3_path).with_name(f"{stem}_{i}_overlay.jpg")
+            with tempfile.NamedTemporaryFile(suffix=".jpg", delete=False) as tmp:
+                imsave(tmp.name, overlay_rgb_uint8, check_contrast=False)
+                shutil.copy(tmp.name, jpg_path)
+                Path(tmp.name).unlink()
+            print(f"Saved overlay to {jpg_path}")
 
-            # Save cell properties
+            # Extract cell properties
             cell_properties_um = segmentation_mask.convert_properties_to_microns(
                 pixel_size_um=pixel_size_um
             )
             dataframe = pd.DataFrame.from_dict(cell_properties_um)
-            stem = Path(s3_path).stem
+            # Save cell properties
             csv_path = Path(s3_path).with_name(f"{stem}_{i}_measurements.csv")
             with tempfile.NamedTemporaryFile(suffix=".csv", delete=False) as tmp:
                 dataframe.to_csv(tmp.name, index=False)
@@ -192,9 +211,7 @@ def main():
                 if err is not None:
                     print(f"  {name}: FAILED — {err}")
                 else:
-                    print(
-                        f"  {name}: {cell_count} total cells across all frames"
-                    )
+                    print(f"  {name}: {cell_count} total cells across all frames")
         except Exception as e:
             print(f"Failed LIF {lif_path} ({image_name}): {type(e).__name__}: {e}")
             traceback.print_exc()
