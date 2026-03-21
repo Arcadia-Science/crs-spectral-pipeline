@@ -209,28 +209,14 @@ def segment_stack(s3_path: str, pixel_size_um: float) -> tuple[str, int | None, 
         return s3_path, None, msg
 
 
-@app.local_entrypoint()
-def main() -> None:
-    """Orchestrate LIF splitting and stack segmentation runs.
-
-    For each configured LIF/image pair, this entrypoint first writes split TIFF
-    stacks, then dispatches segmentation across stacks with Modal starmap.
-    """
-    lif_path_image_name_mapping: dict[str, str] = {
-        "The_Borg/Tara/2026-03-05/Chlorella_WT_Bristol_slide1.lif": (
-            "Lambda_SRS_CARS_1800_600_1pt0_Nav1"
-        ),
-        "The_Borg/Tara/2026-03-05/Chlorella_WT_Bristol_slide2.lif": (
-            "Lambda_SRS_CARS_1800_600_1pt0_Nav1"
-        ),
-        "The_Borg/Tara/2026-03-09/Chlorella_WT_TAP_slide1.lif": "Lambda_1800_600_1pt0_Nav2",
-        "The_Borg/Tara/2026-03-09/Chlorella_WT_TAP_slide2.lif": "Lambda_1800_600_1pt0_Nav1",
-    }
-
-    m_range = (0, 9)  # least common denominator M range
-    lambda_range = None  # None for full lambda range
-    channel_names = ["E-CARS"]
-
+@app.function(image=image, volumes={"/s3": s3_mount})
+def run_pipeline(
+    lif_path_image_name_mapping: dict[str, str],
+    m_range: tuple[int, int] | None,
+    lambda_range: tuple[int, int] | None,
+    channel_names: list[str] | None,
+) -> None:
+    """Run split + segmentation over all configured LIF/image pairs."""
     for lif_path, image_name in lif_path_image_name_mapping.items():
         try:
             print(f"Splitting LIF: M={m_range}, Lambda={lambda_range}, channels={channel_names}")
@@ -250,3 +236,47 @@ def main() -> None:
         except Exception as e:
             print(f"Failed LIF {lif_path} ({image_name}): {type(e).__name__}: {e}")
             traceback.print_exc()
+
+
+@app.local_entrypoint()
+def main(detach: bool = False) -> None:
+    """Orchestrate LIF splitting and stack segmentation runs.
+
+    For each configured LIF/image pair, this entrypoint first writes split TIFF
+    stacks, then dispatches segmentation across stacks with Modal starmap.
+
+    Set `detach=True` to submit orchestration as a background Modal job and
+    return immediately.
+    """
+    lif_path_image_name_mapping: dict[str, str] = {
+        "The_Borg/Tara/2026-03-05/Chlorella_WT_Bristol_slide1.lif": (
+            "Lambda_SRS_CARS_1800_600_1pt0_Nav1"
+        ),
+        "The_Borg/Tara/2026-03-05/Chlorella_WT_Bristol_slide2.lif": (
+            "Lambda_SRS_CARS_1800_600_1pt0_Nav1"
+        ),
+        "The_Borg/Tara/2026-03-09/Chlorella_WT_TAP_slide1.lif": "Lambda_1800_600_1pt0_Nav2",
+        "The_Borg/Tara/2026-03-09/Chlorella_WT_TAP_slide2.lif": "Lambda_1800_600_1pt0_Nav1",
+    }
+
+    m_range = (0, 9)  # least common denominator M range
+    lambda_range = None  # None for full lambda range
+    channel_names = ["E-CARS"]
+
+    if detach:
+        call = run_pipeline.spawn(
+            lif_path_image_name_mapping,
+            m_range,
+            lambda_range,
+            channel_names,
+        )
+        print("Submitted detached pipeline job.")
+        print(f"Function call id: {call.object_id}")
+        return
+
+    run_pipeline.remote(
+        lif_path_image_name_mapping,
+        m_range,
+        lambda_range,
+        channel_names,
+    )
