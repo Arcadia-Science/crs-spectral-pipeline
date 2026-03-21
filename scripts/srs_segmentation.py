@@ -239,14 +239,14 @@ def run_pipeline(
 
 
 @app.local_entrypoint()
-def main(detach: bool = False) -> None:
+def main(run_mode: str = "blocking") -> None:
     """Orchestrate LIF splitting and stack segmentation runs.
 
     For each configured LIF/image pair, this entrypoint first writes split TIFF
     stacks, then dispatches segmentation across stacks with Modal starmap.
 
-    Set `detach=True` to submit orchestration as a background Modal job and
-    return immediately.
+    Set `run_mode="detached"` to submit orchestration as a background Modal
+    job and return immediately.
     """
     lif_path_image_name_mapping: dict[str, str] = {
         "The_Borg/Tara/2026-03-05/Chlorella_WT_Bristol_slide1.lif": (
@@ -263,7 +263,10 @@ def main(detach: bool = False) -> None:
     lambda_range = None  # None for full lambda range
     channel_names = ["E-CARS"]
 
-    if detach:
+    if run_mode not in {"blocking", "detached"}:
+        raise ValueError('run_mode must be one of: "blocking", "detached"')
+
+    if run_mode == "detached":
         call = run_pipeline.spawn(
             lif_path_image_name_mapping,
             m_range,
