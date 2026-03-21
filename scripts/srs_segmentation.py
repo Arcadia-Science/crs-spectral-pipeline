@@ -227,8 +227,8 @@ def main() -> None:
         "The_Borg/Tara/2026-03-09/Chlorella_WT_TAP_slide2.lif": "Lambda_1800_600_1pt0_Nav1",
     }
 
-    m_range = (0, 1)  # (0, 9) for full M range
-    lambda_range = (0, 1)  # None for full lambda range
+    m_range = (0, 9)  # (0, 9) for least common denominator M range
+    lambda_range = None  # None for full lambda range
     channel_names = ["E-CARS"]
 
     for lif_path, image_name in lif_path_image_name_mapping.items():
