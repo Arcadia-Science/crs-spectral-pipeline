@@ -85,7 +85,6 @@ def split_lif_file(
 @app.function(image=image, gpu="T4", volumes={"/s3": s3_mount}, max_containers=10)
 def segment_stack(s3_path: str, pixel_size_um: float) -> tuple[str, int | None, str | None]:
     """Returns (path, total_cells, error_message). error_message is None on success."""
-    import numpy as np
     import pandas as pd
     import skimage as ski
     from arcadia_microscopy_tools import Channel, overlay_channels
