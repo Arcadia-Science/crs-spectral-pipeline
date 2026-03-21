@@ -33,14 +33,18 @@ def split_lif_file(
     full_lif_path = Path(f"/s3/{lif_path}")
     image = MicroscopyImage.from_lif_path(full_lif_path, image_name=image_name)
 
-    # Extract pixel size from image
-    pixel_size_um = image.metadata.instrument.channel_metadata_list[0].resolution.xy_step_um
-
     if channel_names is not None:
         channels = [ch for ch in image.channels if ch.name in channel_names]
     else:
         channels = list(image.channels)
     print(f"Found channels: {[ch.name for ch in channels]}")
+
+    # Extract pixel size from image
+    channel_index = image.channels.index(channels[0])
+    pixel_size_um = image.metadata.instrument.channel_metadata_list[
+        channel_index
+    ].resolution.xy_step_um
+    print(f"Pixel size: {pixel_size_um} um/pixel")
 
     lif_parent = full_lif_path.parent
     output_dir = lif_parent / "unpacked" / image_name
@@ -149,10 +153,10 @@ def segment_stack(s3_path: str, pixel_size_um: float) -> tuple[str, int]:
 def main():
 
     lif_path_image_name_mapping = {
-        "The_Borg/Tara/2026-03-05/Chlorella_vulgaris_WT_Bristol_2026-03-05_slide1.lif": (
+        "The_Borg/Tara/2026-03-05/Chlorella_WT_Bristol_slide1.lif": (
             "Lambda_SRS_CARS_1800_600_1pt0_Nav1"
         ),
-        "The_Borg/Tara/2026-03-05/Chlorella_vulgaris_WT_Bristol_2026-03-05_slide2.lif": (
+        "The_Borg/Tara/2026-03-05/Chlorella_WT_Bristol_slide2.lif": (
             "Lambda_SRS_CARS_1800_600_1pt0_Nav1"
         ),
         "The_Borg/Tara/2026-03-09/Chlorella_WT_TAP_slide1.lif": "Lambda_1800_600_1pt0_Nav2",
@@ -162,7 +166,7 @@ def main():
     # Crop configuration — set to None to use the full range
     m_range = (0, 1)  #  (0, 9)
     lambda_range = (0, 1)  #  None
-    channel_names = ["CARS"]
+    channel_names = ["E-CARS"]
 
     for lif_path, image_name in lif_path_image_name_mapping.items():
         print(f"Splitting LIF: M={m_range}, Lambda={lambda_range}, channels={channel_names}")
