@@ -22,6 +22,11 @@ image = modal.Image.debian_slim().uv_pip_install(dependencies)
 
 
 def _write_via_temp(dest: str | Path, suffix: str, writer: Callable[[str], None]) -> None:
+    """Write an artifact via a temporary local file.
+
+    This avoids partial writes on mounted storage by writing locally first,
+    then copying the completed file to `dest`.
+    """
     with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as tmp:
         writer(tmp.name)
         shutil.copy(tmp.name, dest)
@@ -36,6 +41,14 @@ def split_lif_file(
     lambda_range: tuple[int, int] | None = None,
     channel_names: list[str] | None = None,
 ) -> tuple[list[str], float]:
+    """Split a LIF image series into per-M TIFF stacks.
+
+    The function loads one image series, optionally filters channels, applies
+    optional M and lambda slicing, and writes one TIFF stack per M index.
+
+    Returns:
+        A tuple of (written_tiff_paths, pixel_size_um).
+    """
     from arcadia_microscopy_tools import MicroscopyImage
     from skimage.io import imsave
 
@@ -64,6 +77,7 @@ def split_lif_file(
         intensities = image.get_intensities_from_channel(channel)
         print(f"Channel '{channel.name}' raw shape: {intensities.shape}")
 
+        # Apply optional crop windows while preserving full-range defaults.
         m_slice = slice(*m_range) if m_range is not None else slice(None)
         l_slice = slice(*lambda_range) if lambda_range is not None else slice(None)
         cropped = intensities[m_slice, l_slice, :, :]
@@ -91,7 +105,18 @@ def split_lif_file(
 
 @app.function(image=image, gpu="T4", volumes={"/s3": s3_mount}, max_containers=10)
 def segment_stack(s3_path: str, pixel_size_um: float) -> tuple[str, int | None, str | None]:
-    """Return (input_stack_path, total_cells, error). error is None on success."""
+    """Segment all frames in a stack and persist QC/measurement outputs.
+
+    Workflow:
+        1) Load and preprocess each frame.
+        2) Run segmentation per frame.
+        3) Save per-frame overlay JPGs and measurement CSVs.
+        4) Save the full mask stack as TIFF.
+
+    Returns:
+        (input_stack_path, total_cells, error_message), where `error_message`
+        is None on success.
+    """
     import pandas as pd
     import skimage as ski
     from arcadia_microscopy_tools import Channel, overlay_channels
@@ -110,6 +135,7 @@ def segment_stack(s3_path: str, pixel_size_um: float) -> tuple[str, int | None, 
 
         preprocess = PipelineParallelized(
             [
+                # Light denoise + local contrast + background suppression.
                 ImageOperation(ski.filters.gaussian, sigma=1.2),
                 ImageOperation(ski.exposure.equalize_adapthist, clip_limit=0.01),
                 ImageOperation(subtract_background_dog, percentile=10),
@@ -129,6 +155,7 @@ def segment_stack(s3_path: str, pixel_size_um: float) -> tuple[str, int | None, 
             num_cells = segmentation_mask.num_cells
             total_cells += num_cells
 
+            # Convert label boundaries into a human-readable QC overlay.
             mask_channel = Channel("mask", color=HexCode("", "#ffff00"))
             mask_outlines = masks_to_outlines(segmentation_mask.label_image)
             overlay_rgb_float = overlay_channels(
@@ -158,6 +185,7 @@ def segment_stack(s3_path: str, pixel_size_um: float) -> tuple[str, int | None, 
             )
             print(f"Saved cell properties to {csv_path}")
 
+            # Keep masks in memory to emit a single multi-frame TIFF artifact.
             masks.append(mask)
             print(f"  Frame {i}/{len(preprocessed)}: {num_cells} cells")
 
@@ -183,6 +211,11 @@ def segment_stack(s3_path: str, pixel_size_um: float) -> tuple[str, int | None, 
 
 @app.local_entrypoint()
 def main() -> None:
+    """Orchestrate LIF splitting and stack segmentation runs.
+
+    For each configured LIF/image pair, this entrypoint first writes split TIFF
+    stacks, then dispatches segmentation across stacks with Modal starmap.
+    """
     lif_path_image_name_mapping: dict[str, str] = {
         "The_Borg/Tara/2026-03-05/Chlorella_WT_Bristol_slide1.lif": (
             "Lambda_SRS_CARS_1800_600_1pt0_Nav1"
