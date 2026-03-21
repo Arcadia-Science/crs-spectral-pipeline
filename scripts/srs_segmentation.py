@@ -2,6 +2,7 @@ from __future__ import annotations
 import shutil
 import tempfile
 import traceback
+from collections.abc import Callable
 from pathlib import Path
 
 import modal
@@ -18,6 +19,13 @@ dependencies = [
     "arcadia-microscopy-tools[all]>=0.3.1",
 ]
 image = modal.Image.debian_slim().uv_pip_install(dependencies)
+
+
+def _write_via_temp(dest: str | Path, suffix: str, writer: Callable[[str], None]) -> None:
+    with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as tmp:
+        writer(tmp.name)
+        shutil.copy(tmp.name, dest)
+        Path(tmp.name).unlink()
 
 
 @app.function(image=image, volumes={"/s3": s3_mount})
@@ -40,7 +48,6 @@ def split_lif_file(
         channels = list(image.channels)
     print(f"Found channels: {[ch.name for ch in channels]}")
 
-    # Extract pixel size from image
     channel_index = image.channels.index(channels[0])
     pixel_size_um = image.metadata.instrument.channel_metadata_list[
         channel_index
@@ -57,7 +64,6 @@ def split_lif_file(
         intensities = image.get_intensities_from_channel(channel)
         print(f"Channel '{channel.name}' raw shape: {intensities.shape}")
 
-        # intensities shape is (M, Lambda, Y, X) — slice M and Lambda
         m_slice = slice(*m_range) if m_range is not None else slice(None)
         l_slice = slice(*lambda_range) if lambda_range is not None else slice(None)
         cropped = intensities[m_slice, l_slice, :, :]
@@ -66,14 +72,15 @@ def split_lif_file(
         print(f"Channel '{channel.name}' cropped shape: {cropped.shape}")
 
         for m_idx in range(cropped.shape[0]):
-            stack = cropped[m_idx]  # (Lambda, Y, X)
+            stack = cropped[m_idx]
             filename = f"{channel.name}_M{m_start + m_idx:03d}.tiff"
             output_path = output_dir / filename
 
-            with tempfile.NamedTemporaryFile(suffix=".tiff", delete=False) as tmp:
-                imsave(tmp.name, stack, check_contrast=False)
-                shutil.copy(tmp.name, str(output_path))
-                Path(tmp.name).unlink()
+            _write_via_temp(
+                output_path,
+                ".tiff",
+                lambda p, arr=stack: imsave(p, arr, check_contrast=False),
+            )
 
             tiff_paths.append(str(output_path))
             print(f"Saved {filename} with shape {stack.shape}")
@@ -84,7 +91,7 @@ def split_lif_file(
 
 @app.function(image=image, gpu="T4", volumes={"/s3": s3_mount}, max_containers=10)
 def segment_stack(s3_path: str, pixel_size_um: float) -> tuple[str, int | None, str | None]:
-    """Returns (path, total_cells, error_message). error_message is None on success."""
+    """Return (input_stack_path, total_cells, error). error is None on success."""
     import pandas as pd
     import skimage as ski
     from arcadia_microscopy_tools import Channel, overlay_channels
@@ -97,8 +104,9 @@ def segment_stack(s3_path: str, pixel_size_um: float) -> tuple[str, int | None, 
     from skimage.io import imread, imsave
 
     try:
-        stack = imread(s3_path)  # (Lambda, Y, X)
-        print(f"Loaded {Path(s3_path).name}: shape {stack.shape}, dtype {stack.dtype}")
+        stack_path = Path(s3_path)
+        stack = imread(s3_path)
+        print(f"Loaded {stack_path.name}: shape {stack.shape}, dtype {stack.dtype}")
 
         preprocess = PipelineParallelized(
             [
@@ -111,15 +119,16 @@ def segment_stack(s3_path: str, pixel_size_um: float) -> tuple[str, int | None, 
         preprocessed = preprocess(stack)
 
         model = SegmentationModel()
-        masks = []
+        masks: list[np.ndarray] = []
         total_cells = 0
+        stem = stack_path.stem
+
         for i, frame in enumerate(preprocessed):
             mask = model.segment(frame)
             segmentation_mask = SegmentationMask(mask)
             num_cells = segmentation_mask.num_cells
             total_cells += num_cells
 
-            # Create overlay
             mask_channel = Channel("mask", color=HexCode("", "#ffff00"))
             mask_outlines = masks_to_outlines(segmentation_mask.label_image)
             overlay_rgb_float = overlay_channels(
@@ -129,44 +138,40 @@ def segment_stack(s3_path: str, pixel_size_um: float) -> tuple[str, int | None, 
                 overlay_rgb_float,
                 out_range=np.uint8,  # pyright: ignore[reportArgumentType]
             )
-            # Save overlay
-            stem = Path(s3_path).stem
-            jpg_path = Path(s3_path).with_name(f"{stem}_{i}_overlay.jpg")
-            with tempfile.NamedTemporaryFile(suffix=".jpg", delete=False) as tmp:
-                imsave(tmp.name, overlay_rgb_uint8, check_contrast=False)
-                shutil.copy(tmp.name, jpg_path)
-                Path(tmp.name).unlink()
+            jpg_path = stack_path.with_name(f"{stem}_{i}_overlay.jpg")
+            _write_via_temp(
+                jpg_path,
+                ".jpg",
+                lambda p, img=overlay_rgb_uint8: imsave(p, img, check_contrast=False),
+            )
             print(f"Saved overlay to {jpg_path}")
 
-            # Extract cell properties
             cell_properties_um = segmentation_mask.convert_properties_to_microns(
                 pixel_size_um=pixel_size_um
             )
             dataframe = pd.DataFrame.from_dict(cell_properties_um)
-            # Save cell properties
-            csv_path = Path(s3_path).with_name(f"{stem}_{i}_measurements.csv")
-            with tempfile.NamedTemporaryFile(suffix=".csv", delete=False) as tmp:
-                dataframe.to_csv(tmp.name, index=False)
-                shutil.copy(tmp.name, csv_path)
-                Path(tmp.name).unlink()
+            csv_path = stack_path.with_name(f"{stem}_{i}_measurements.csv")
+            _write_via_temp(
+                csv_path,
+                ".csv",
+                lambda p, df=dataframe: df.to_csv(p, index=False),
+            )
             print(f"Saved cell properties to {csv_path}")
 
-            # Append masks
             masks.append(mask)
             print(f"  Frame {i}/{len(preprocessed)}: {num_cells} cells")
 
         mask_stack = np.stack(masks).astype(np.uint16)
-
-        stem = Path(s3_path).stem
-        mask_path = str(Path(s3_path).parent / f"{stem}_masks.tiff")
-        with tempfile.NamedTemporaryFile(suffix=".tiff", delete=False) as tmp:
-            imsave(tmp.name, mask_stack, check_contrast=False)
-            shutil.copy(tmp.name, mask_path)
-            Path(tmp.name).unlink()
+        mask_path = stack_path.parent / f"{stem}_masks.tiff"
+        _write_via_temp(
+            mask_path,
+            ".tiff",
+            lambda p: imsave(p, mask_stack, check_contrast=False),
+        )
 
         print(
-            f"Saved {Path(mask_path).name}: shape {mask_stack.shape}, total cells across frames: "
-            f"{total_cells}"
+            f"Saved {mask_path.name}: shape {mask_stack.shape}, "
+            f"total cells across frames: {total_cells}"
         )
         return s3_path, total_cells, None
     except Exception as e:
@@ -177,9 +182,8 @@ def segment_stack(s3_path: str, pixel_size_um: float) -> tuple[str, int | None, 
 
 
 @app.local_entrypoint()
-def main():
-
-    lif_path_image_name_mapping = {
+def main() -> None:
+    lif_path_image_name_mapping: dict[str, str] = {
         "The_Borg/Tara/2026-03-05/Chlorella_WT_Bristol_slide1.lif": (
             "Lambda_SRS_CARS_1800_600_1pt0_Nav1"
         ),
@@ -190,9 +194,8 @@ def main():
         "The_Borg/Tara/2026-03-09/Chlorella_WT_TAP_slide2.lif": "Lambda_1800_600_1pt0_Nav1",
     }
 
-    # Crop configuration — set to None to use the full range
-    m_range = (0, 1)  #  (0, 9)
-    lambda_range = (0, 1)  #  None
+    m_range = (0, 1)  # (0, 9) for full M range
+    lambda_range = (0, 1)  # None for full lambda range
     channel_names = ["E-CARS"]
 
     for lif_path, image_name in lif_path_image_name_mapping.items():
