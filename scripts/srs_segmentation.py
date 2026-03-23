@@ -151,6 +151,12 @@ def segment_stack(s3_path: str, pixel_size_um: float) -> tuple[str, int | None, 
 
         for i, frame in enumerate(preprocessed):
             mask = model.segment(frame)
+            masks.append(mask)
+
+            if mask.max() == 0:
+                print(f"  Frame {i}/{len(preprocessed)}: 0 cells (skipping QC outputs)")
+                continue
+
             segmentation_mask = SegmentationMask(mask)
             num_cells = segmentation_mask.num_cells
             total_cells += num_cells
@@ -185,8 +191,6 @@ def segment_stack(s3_path: str, pixel_size_um: float) -> tuple[str, int | None, 
             )
             print(f"Saved cell properties to {csv_path}")
 
-            # Keep masks in memory to emit a single multi-frame TIFF artifact.
-            masks.append(mask)
             print(f"  Frame {i}/{len(preprocessed)}: {num_cells} cells")
 
         mask_stack = np.stack(masks).astype(np.uint16)
