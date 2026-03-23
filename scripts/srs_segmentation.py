@@ -179,6 +179,7 @@ def segment_stack(s3_path: str, pixel_size_um: float) -> tuple[str, int | None, 
             )
             print(f"Saved overlay to {jpg_path}")
 
+            # Convert cell properties to microns and save as CSV.
             cell_properties_um = segmentation_mask.convert_properties_to_microns(
                 pixel_size_um=pixel_size_um
             )
