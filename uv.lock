@@ -33,7 +33,7 @@ dev = [
 
 [package.metadata]
 requires-dist = [
-    { name = "arcadia-microscopy-tools", extras = ["all"], specifier = ">=0.3.1" },
+    { name = "arcadia-microscopy-tools", extras = ["all"], specifier = ">=0.3.2" },
     { name = "btrack", specifier = ">=0.7.0" },
     { name = "jupyter", specifier = ">=1.1.1" },
     { name = "plotly", specifier = ">=6.6.0" },
@@ -195,7 +195,7 @@ wheels = [
 
 [[package]]
 name = "arcadia-microscopy-tools"
-version = "0.3.1"
+version = "0.3.2"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "arcadia-pycolor" },
@@ -207,9 +207,9 @@ dependencies = [
     { name = "pydantic" },
     { name = "scikit-image" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/c4/ac/48b27f40ea1b5e147951f04910e253386d49b6300621d950b3c2520355bd/arcadia_microscopy_tools-0.3.1.tar.gz", hash = "sha256:37cc4ee70da10c98bfdf39d60131c4c25359a84229b1b6524ab958a5a179994e", size = 3325991, upload-time = "2026-02-28T01:53:51.631Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/8e/59/0be702d252c7bf935a9f4eca83db1435ab85b5da99575943810bdf35ea0f/arcadia_microscopy_tools-0.3.2.tar.gz", hash = "sha256:bf45a847b243aa1c364bc07a0e901dd8006e013dc5bbc2792f3408e9304ed8c9", size = 3326355, upload-time = "2026-03-23T22:50:35.672Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/5c/1f/3f56807162e677f4d90590991399acd120b590cd95b721d12f9c9f2935db/arcadia_microscopy_tools-0.3.1-py3-none-any.whl", hash = "sha256:49f3df5004598b8ec45c632e129aad1212bd8e88b21b3fbdf91211cfc55c044c", size = 1862673, upload-time = "2026-02-28T01:53:49.911Z" },
+    { url = "https://files.pythonhosted.org/packages/8e/1a/d3297a140a1694b9a00707575ec7a8aac6d353fa43a57ca316124efd9839/arcadia_microscopy_tools-0.3.2-py3-none-any.whl", hash = "sha256:324a711d420921bbea9ceffc08f435ff0b91bf9471043c93ed661b0f32eb526b", size = 1863223, upload-time = "2026-03-23T22:50:37.26Z" },
 ]
 
 [package.optional-dependencies]
