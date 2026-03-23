@@ -103,7 +103,7 @@ def split_lif_file(
     return tiff_paths, pixel_size_um
 
 
-@app.function(image=image, gpu="T4", volumes={"/s3": s3_mount}, max_containers=10, timeout=3600)
+@app.function(image=image, gpu="T4", volumes={"/s3": s3_mount}, max_containers=10, timeout=900)
 def segment_stack(s3_path: str, pixel_size_um: float) -> tuple[str, int | None, str | None]:
     """Segment all frames in a stack and persist QC/measurement outputs.
 
@@ -209,7 +209,7 @@ def segment_stack(s3_path: str, pixel_size_um: float) -> tuple[str, int | None, 
         return s3_path, None, msg
 
 
-@app.function(image=image, volumes={"/s3": s3_mount}, timeout=14400)
+@app.function(image=image, volumes={"/s3": s3_mount}, timeout=1800)
 def run_pipeline(
     lif_path_image_name_mapping: dict[str, str],
     m_range: tuple[int, int] | None,
