@@ -6,6 +6,7 @@ readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
     "arcadia-microscopy-tools[all]>=0.3.1",
+    "btrack>=0.7.0",
     "jupyter>=1.1.1",
     "plotly>=6.6.0",
 ]
