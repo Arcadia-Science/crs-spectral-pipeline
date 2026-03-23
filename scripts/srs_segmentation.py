@@ -244,9 +244,6 @@ def main() -> None:
 
     For each configured LIF/image pair, this entrypoint first writes split TIFF
     stacks, then dispatches segmentation across stacks with Modal starmap.
-
-    Important: invoke with ``modal run --detach scripts/srs_segmentation.py``
-    so the Modal app stays alive after the local process exits.
     """
     lif_path_image_name_mapping: dict[str, str] = {
         "The_Borg/Tara/2026-03-05/Chlorella_WT_Bristol_slide1.lif": (
@@ -263,12 +260,9 @@ def main() -> None:
     lambda_range = None  # None for full lambda range
     channel_names = ["E-CARS"]
 
-    call = run_pipeline.spawn(
+    run_pipeline.remote(
         lif_path_image_name_mapping,
         m_range,
         lambda_range,
         channel_names,
     )
-    print("Submitted detached pipeline job.")
-    print("Run with: modal run --detach scripts/srs_segmentation.py")
-    print(f"Function call id: {call.object_id}")
