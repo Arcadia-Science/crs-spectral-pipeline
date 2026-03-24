@@ -1,13 +1,20 @@
 """Extract per-cell SRS spectra from a segmented LIF image series.
 
 For each FOV (M-index), this script:
-    1. Loads pre-computed segmentation masks.
-    2. Tracks cells across lambda frames with btrack.
-    3. Extracts the mean SRS intensity per cell per wavenumber.
-    4. Writes a CSV and an interactive HTML figure.
+    1. Loads pre-computed segmentation masks (from ``srs_segmentation.py``).
+    2. Tracks cells across lambda frames with btrack, linking the same cell
+       across consecutive wavenumber acquisitions.
+    3. Extracts the mean SRS intensity per cell per wavenumber, producing
+       one spectral curve per tracked cell.
+    4. Writes a tidy CSV (one row per cell-wavenumber pair) and an
+       interactive Plotly HTML figure.
+
+Outputs (written to ``<processed_dir>/spectra/``):
+    - ``SRS_M<nnn>_spectra.csv``  — columns: ID, t, wavenumber_cm1, mean_srs_intensity, …
+    - ``SRS_M<nnn>_spectra.html`` — interactive line chart (one trace per cell + background)
 
 Usage:
-    python scripts/extract_cell_spectra.py \
+    python scripts/extract_cell_spectra.py \\
         /path/to/file.lif "Lambda_SRS_CARS_1800_600_1pt0_Nav1"
 """
 
@@ -36,9 +43,27 @@ BTRACK_CONFIG = Path(__file__).resolve().parent / "btrack_config.json"
 BACKGROUND_ID = -1
 MIN_TRACK_FRAMES = 5
 
+# Columns that btrack adds to its tracklet DataFrames but are not part of the
+# final spectral output.  Dropped right before writing the CSV.
+_BTRACK_INTERNAL_COLS = ["x", "y", "z", "parent", "root", "state", "generation", "dummy"]
+
 
 def _track_cells(label_images: np.ndarray, config_path: Path = BTRACK_CONFIG) -> list[Tracklet]:
-    """Run btrack on a stack of label images and return optimised tracks."""
+    """Run btrack on a stack of label images and return optimised tracks.
+
+    Parameters
+    ----------
+    label_images : np.ndarray
+        Integer label stack of shape ``(T, Y, X)`` where each 2-D slice is a
+        segmentation mask (0 = background).
+    config_path : Path
+        Path to the btrack JSON configuration (motion / hypothesis models).
+
+    Returns
+    -------
+    list[Tracklet]
+        Optimised tracklets linking cell labels across frames.
+    """
     objects = segmentation_to_objects(label_images)
     with btrack.BayesianTracker(verbose=False) as tracker:
         tracker.configure(config_path)
@@ -52,7 +77,22 @@ def _tracks_to_dataframe(
     tracks: list[Tracklet],
     min_frames: int = MIN_TRACK_FRAMES,
 ) -> pd.DataFrame:
-    """Convert tracklets to a DataFrame, keeping only long-enough tracks."""
+    """Convert tracklets to a tidy DataFrame, discarding short tracks.
+
+    Parameters
+    ----------
+    tracks : list[Tracklet]
+        Raw tracklets from :func:`_track_cells`.
+    min_frames : int
+        Minimum number of frames a track must span to be retained.  Short
+        tracks are usually segmentation artefacts or edge cells.
+
+    Returns
+    -------
+    pd.DataFrame
+        One row per (track, frame) pair.  Columns include ``ID``, ``t``,
+        ``x``, ``y``, and various btrack internals.
+    """
     dfs = [pd.DataFrame(t.to_dict()) for t in tracks if len(t) >= min_frames]
     if not dfs:
         raise ValueError(f"No tracks with at least {min_frames} frames found")
@@ -64,20 +104,32 @@ def _filter_complete_tracks(
     t_min: int | None = None,
     t_max: int | None = None,
 ) -> pd.DataFrame:
-    """Keep only tracks that span every frame in [t_min, t_max].
+    """Keep only tracks that span every frame in ``[t_min, t_max]``.
 
-    Defaults to the full temporal range present in the data.
+    Cells that disappear mid-acquisition (due to segmentation dropouts or
+    drifting out of the FOV) produce incomplete spectra that complicate
+    downstream analysis, so they are discarded here.
+
+    Parameters
+    ----------
+    df : pd.DataFrame
+        Track DataFrame from :func:`_tracks_to_dataframe`.
+    t_min, t_max : int | None
+        Temporal window to require coverage over.  Defaults to the full
+        range present in the data.
     """
     t_col = df["t"].to_numpy()
     if t_min is None:
         t_min = int(t_col.min())
     if t_max is None:
         t_max = int(t_col.max())
+
     expected_frames = t_max - t_min + 1
-    df = cast(pd.DataFrame, df[(df["t"] >= t_min) & (df["t"] <= t_max)])
-    counts = cast(pd.Series, df.groupby("ID")["t"].nunique())
-    complete_ids = cast(pd.Series, counts[counts == expected_frames]).index.tolist()
-    return cast(pd.DataFrame, df.loc[df["ID"].isin(complete_ids)])
+    in_window = df[(df["t"] >= t_min) & (df["t"] <= t_max)]
+    frames_per_id = cast(pd.Series, in_window.groupby("ID")["t"].nunique())
+    complete_ids = cast(pd.Series, frames_per_id[frames_per_id == expected_frames]).index.tolist()
+    id_col = cast(pd.Series, in_window["ID"])
+    return cast(pd.DataFrame, in_window.loc[id_col.isin(complete_ids)])
 
 
 def _extract_cell_spectra(
@@ -86,33 +138,67 @@ def _extract_cell_spectra(
     srs_intensities: np.ndarray,
     wavenumbers: np.ndarray,
 ) -> pd.DataFrame:
-    """Populate each tracked row with wavenumber and mean SRS intensity.
+    """Compute the mean SRS intensity for each tracked cell at each wavenumber.
 
-    Rows whose centroid falls on background (label == 0) are dropped.
+    For every (cell, frame) row in *df*, the tracked centroid is used to look
+    up which segmentation label the cell belongs to, and then the mean SRS
+    intensity over that label's pixels is recorded.
+
+    Rows whose centroid falls on background (label == 0) or outside the image
+    bounds are dropped — both situations indicate tracking artefacts.
+
+    Parameters
+    ----------
+    df : pd.DataFrame
+        Filtered track DataFrame (one row per cell per frame).
+    masks : list[SegmentationMask]
+        Per-frame segmentation masks, indexed by frame number.
+    srs_intensities : np.ndarray
+        SRS intensity stack of shape ``(T, Y, X)``.
+    wavenumbers : np.ndarray
+        Wavenumber (cm-1) for each frame, same length as *masks*.
+
+    Returns
+    -------
+    pd.DataFrame
+        *df* subset augmented with ``label``, ``wavenumber_cm1``, and
+        ``mean_srs_intensity`` columns.
     """
+    img_h, img_w = masks[0].label_image.shape
+
     labels: list[int] = []
     wn_values: list[float] = []
     intensities: list[float] = []
-    valid_idx: list = []
+    valid_idx: list[int] = []
+    n_oob = 0
 
-    for idx, row in tqdm(df.iterrows(), total=len(df), desc="Extracting spectra"):
-        frame_i = int(cast(float, row["t"]))
-        y_idx = round(cast(float, row["y"]))
-        x_idx = round(cast(float, row["x"]))
+    for row in tqdm(df.itertuples(), total=len(df), desc="Extracting spectra"):
+        frame_i = int(row.t)  # pyright: ignore[reportAttributeAccessIssue]
+        y_idx = round(row.y)  # pyright: ignore[reportAttributeAccessIssue]
+        x_idx = round(row.x)  # pyright: ignore[reportAttributeAccessIssue]
+
+        # Centroids can be extrapolated outside the image by the tracker.
+        if not (0 <= y_idx < img_h and 0 <= x_idx < img_w):
+            n_oob += 1
+            continue
+
         label = int(masks[frame_i].label_image[y_idx, x_idx])
-
         if label == 0:
             continue
 
         cell_mask = masks[frame_i].label_image == label
-        valid_idx.append(idx)
+        valid_idx.append(row.Index)  # pyright: ignore[reportAttributeAccessIssue]
         labels.append(label)
         wn_values.append(float(wavenumbers[frame_i]))
         intensities.append(float(srs_intensities[frame_i][cell_mask].mean()))
 
     n_skipped = len(df) - len(valid_idx)
-    if n_skipped:
-        print(f"  Warning: {n_skipped}/{len(df)} centroids fell on background, skipped")
+    if n_oob:
+        print(f"  Warning: {n_oob}/{len(df)} centroids were out of bounds, skipped")
+    if n_skipped - n_oob > 0:
+        print(
+            f"  Warning: {n_skipped - n_oob}/{len(df)} centroids fell on background, skipped"
+        )
 
     result = df.loc[valid_idx].copy()
     result["label"] = labels
@@ -126,7 +212,12 @@ def _background_spectra(
     srs_intensities: np.ndarray,
     wavenumbers: np.ndarray,
 ) -> pd.DataFrame:
-    """Compute mean background intensity (label == 0) per frame."""
+    """Compute the mean background SRS intensity (label == 0) per frame.
+
+    The background spectrum is appended to the cell spectra DataFrame with
+    ``ID = BACKGROUND_ID`` so it can be plotted alongside cell traces for
+    reference (e.g. to gauge signal-to-background contrast).
+    """
     records = []
     for frame_i, intensities in enumerate(srs_intensities):
         bg_mask = masks[frame_i].label_image == 0
@@ -145,7 +236,12 @@ def _background_spectra(
 def _make_figure(df: pd.DataFrame, title: str) -> Figure:
     """Create an interactive Plotly line chart of per-cell SRS spectra."""
     fig = px.line(df, x="wavenumber_cm1", y="mean_srs_intensity", color="ID")
-    fig.update_layout(title=title, template="plotly_white")
+    fig.update_layout(
+        title=title,
+        template="plotly_white",
+        xaxis_title="Wavenumber (cm⁻¹)",
+        yaxis_title="Mean SRS intensity (a.u.)",
+    )
     return fig
 
 
@@ -186,7 +282,30 @@ def process_fov(
     animate: bool = False,
     fps: float = 10,
 ) -> None:
-    """Full extraction pipeline for a single FOV (M-index)."""
+    """Run the full spectral-extraction pipeline for a single FOV.
+
+    Steps: load masks -> track cells -> (optionally animate) -> extract spectra
+    -> append background -> write CSV + HTML.
+
+    Parameters
+    ----------
+    image : MicroscopyImage
+        The opened LIF image (all FOVs).
+    m_index : int
+        Which FOV (M-index) to process.
+    masks_path : Path
+        Path to the per-frame segmentation mask TIFF stack for this FOV.
+    wavenumbers : np.ndarray
+        Wavenumber values (cm-1), one per lambda frame.
+    output_dir : Path
+        Directory for CSV / HTML outputs (created if absent).
+    dataset_label : str
+        Human-readable prefix for the plot title.
+    animate : bool
+        If True, also render a napari tracking animation MP4.
+    fps : float
+        Playback FPS for the animation (ignored when *animate* is False).
+    """
     output_dir.mkdir(parents=True, exist_ok=True)
 
     masks_raw = ski.io.imread(masks_path)
@@ -211,8 +330,7 @@ def process_fov(
     df = _filter_complete_tracks(df)
     df = _extract_cell_spectra(df, masks, srs_intensities, wavenumbers)
     df_bg = _background_spectra(masks, srs_intensities, wavenumbers)
-    _btrack_only_cols = ["x", "y", "z", "parent", "root", "state", "generation", "dummy"]
-    df_spectra = pd.concat([df, df_bg]).drop(columns=_btrack_only_cols, errors="ignore")
+    df_spectra = pd.concat([df, df_bg]).drop(columns=_BTRACK_INTERNAL_COLS, errors="ignore")
 
     stem = f"SRS_M{m_index:03d}"
     df_spectra.to_csv(output_dir / f"{stem}_spectra.csv", index=False)
@@ -229,6 +347,7 @@ def main(
     animate: bool = False,
     fps: float = 10,
 ) -> None:
+    """Entry point: discover mask TIFFs, resolve wavenumbers, and loop over FOVs."""
     processed_dir = lif_path.parent / "processed" / lif_path.stem / image_name
     masks_paths = natsorted(processed_dir.glob("*masks.tiff"))
     if not masks_paths:
@@ -236,18 +355,30 @@ def main(
 
     image = MicroscopyImage.from_lif_path(lif_path, image_name=image_name)
 
-    channel_index = [ch.name for ch in image.channels].index("SRS")
+    channel_names = [ch.name for ch in image.channels]
+    if "SRS" not in channel_names:
+        raise ValueError(
+            f"'SRS' channel not found in image — available channels: {channel_names}"
+        )
+    channel_index = channel_names.index("SRS")
+
     wavelengths_nm = image.metadata.instrument.channel_metadata_list[
         channel_index
     ].measured.w_values_nm
     if wavelengths_nm is None:
-        raise ValueError("Wavelengths not found in metadata")
+        raise ValueError(
+            f"Wavelengths (w_values_nm) not found in metadata for channel "
+            f"'{channel_names[channel_index]}' (index {channel_index})"
+        )
     wavenumbers = np.asarray(calculate_raman_shift(wavelengths_nm))
 
     dataset_label = f"{lif_path.parent.name}_{lif_path.stem}"
     output_dir = processed_dir / "spectra"
 
-    for masks_path in masks_paths[:3]:
+    passed = 0
+    failed_fovs: list[str] = []
+
+    for masks_path in masks_paths:
         m_match = re.search(r"M(\d+)", masks_path.stem)
         if m_match is None:
             print(f"  Skipping {masks_path.name}: could not parse M-index")
@@ -265,8 +396,15 @@ def main(
                 animate=animate,
                 fps=fps,
             )
+            passed += 1
         except Exception as e:
             print(f"  Skipping FOV M{m_index:03d}: {type(e).__name__}: {e}")
+            failed_fovs.append(f"M{m_index:03d}")
+
+    total = passed + len(failed_fovs)
+    print(f"\nDone: {passed}/{total} FOVs succeeded")
+    if failed_fovs:
+        print(f"  Failed: {', '.join(failed_fovs)}")
 
 
 if __name__ == "__main__":
