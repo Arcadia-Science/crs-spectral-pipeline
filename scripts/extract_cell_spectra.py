@@ -49,7 +49,7 @@ _BTRACK_INTERNAL_COLS = ["x", "y", "z", "parent", "root", "state", "generation",
 
 # GLPK options for btrack optimiser: set time limit (tm_lim, ms) and
 # acceptable MIP gap for optimisation
-GLPK_OPTIONS = {"tm_lim": 120_000, "mip_gap": 0.01}
+GLPK_OPTIONS: dict[str, object] = {"tm_lim": 120_000, "mip_gap": 0.003}
 
 
 def _track_cells(label_images: np.ndarray, config_path: Path = BTRACK_CONFIG) -> list[Tracklet]:
@@ -390,6 +390,8 @@ def main(
 
 
 if __name__ == "__main__":
+    from btrack_patches import patch_optimiser
+
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("lif_path", type=Path, help="Path to the .lif file")
     parser.add_argument("image_name", type=str, help="Image series name inside the LIF")
@@ -399,7 +401,17 @@ if __name__ == "__main__":
         help="Save a napari tracking animation (MP4) for each FOV",
     )
     parser.add_argument(
-        "--fps", type=float, default=4, help="Animation playback FPS (default: 4)"
+        "--fps", type=float, default=10, help="Animation playback FPS (default: 10)"
+    )
+    parser.add_argument(
+        "--patch-btrack",
+        action="store_true",
+        help="Patch btrack's optimiser to accept 'feasible' GLPK solutions "
+        "(required when using mip_gap or tm_lim options that cause early termination)",
     )
     args = parser.parse_args()
+
+    if args.patch_btrack:
+        patch_optimiser()
+
     main(args.lif_path, args.image_name, animate=args.animate, fps=args.fps)
