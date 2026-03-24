@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -uo pipefail
 
-NAS_ROOT="$HOME/arc_nas_mirror"
+DATA_DIR_ROOT="$HOME/arc_nas_mirror"
 SCRIPT="$(cd "$(dirname "$0")" && pwd)/extract_cell_spectra.py"
 
 LIF_PATHS=(
@@ -22,7 +22,7 @@ failed=0
 failed_names=()
 
 for i in "${!LIF_PATHS[@]}"; do
-    lif_path="$NAS_ROOT/${LIF_PATHS[$i]}"
+    lif_path="$DATA_DIR_ROOT/${LIF_PATHS[$i]}"
     image_name="${IMAGE_NAMES[$i]}"
     label="$(basename "${LIF_PATHS[$i]}" .lif) / $image_name"
 
