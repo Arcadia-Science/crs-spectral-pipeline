@@ -186,9 +186,7 @@ def _extract_cell_spectra(
     if n_oob:
         print(f"  Warning: {n_oob}/{len(df)} centroids were out of bounds, skipped")
     if n_skipped - n_oob > 0:
-        print(
-            f"  Warning: {n_skipped - n_oob}/{len(df)} centroids fell on background, skipped"
-        )
+        print(f"  Warning: {n_skipped - n_oob}/{len(df)} centroids fell on background, skipped")
 
     result = df.loc[valid_idx].copy()
     result["label"] = labels
@@ -339,9 +337,7 @@ def main(
 
     channel_names = [ch.name for ch in image.channels]
     if "SRS" not in channel_names:
-        raise ValueError(
-            f"'SRS' channel not found in image — available channels: {channel_names}"
-        )
+        raise ValueError(f"'SRS' channel not found in image — available channels: {channel_names}")
     channel_index = channel_names.index("SRS")
 
     wavelengths_nm = image.metadata.instrument.channel_metadata_list[

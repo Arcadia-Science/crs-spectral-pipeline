@@ -95,10 +95,7 @@ def _patched_optimise(self):  # noqa: PLR0912
         return []
 
     if status == "feasible":
-        logger.info(
-            "Optimizer returned 'feasible' (gap tolerance reached). "
-            "Accepting solution."
-        )
+        logger.info("Optimizer returned 'feasible' (gap tolerance reached). Accepting solution.")
 
     results = [i for i, h in enumerate(self.hypotheses) if x[i] > 0]
     logger.info(f"Optimization complete. (Solution: {status})")
