@@ -7,7 +7,6 @@ Adapted from https://github.com/Arcadia-Science/burt-lancaster
 """
 
 from __future__ import annotations
-
 import logging
 from dataclasses import dataclass
 from functools import cached_property
@@ -78,10 +77,16 @@ class NapariAnimator:
         """Create and save a napari animation to an MP4 file."""
         viewer = napari.Viewer(show=True)
         try:
-            viewer.add_image(self.foreground, rgb=False, name="SRS")
+            viewer.add_image(self.foreground, name="SRS")
 
             if self.labels is not None:
-                viewer.add_labels(self.labels, name="masks", opacity=0.3)
+                viewer.add_image(
+                    self.labels,
+                    name="cell outlines",
+                    blending="additive",
+                    opacity=0.7,
+                    colormap="green",
+                )
 
             if self.napari_tracks is not None:
                 viewer.add_tracks(self.napari_tracks, name="tracks")
