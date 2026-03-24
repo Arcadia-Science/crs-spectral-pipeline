@@ -12,11 +12,11 @@ from dataclasses import dataclass
 from functools import cached_property
 from pathlib import Path
 
-import napari
+import napari  # type: ignore[import-not-found]
 import numpy as np
 from btrack.btypes import Tracklet
 from btrack.utils import tracks_to_napari
-from napari_animation import Animation
+from napari_animation import Animation  # type: ignore[import-not-found]
 
 logger = logging.getLogger(__name__)
 
