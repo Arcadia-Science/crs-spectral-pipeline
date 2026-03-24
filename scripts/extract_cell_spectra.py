@@ -247,7 +247,7 @@ def main(
     dataset_label = f"{lif_path.parent.name}_{lif_path.stem}"
     output_dir = processed_dir / "spectra"
 
-    for masks_path in masks_paths[:1]:
+    for masks_path in masks_paths[:3]:
         m_match = re.search(r"M(\d+)", masks_path.stem)
         if m_match is None:
             print(f"  Skipping {masks_path.name}: could not parse M-index")
@@ -279,7 +279,7 @@ if __name__ == "__main__":
         help="Save a napari tracking animation (MP4) for each FOV",
     )
     parser.add_argument(
-        "--fps", type=float, default=10, help="Animation playback FPS (default: 10)"
+        "--fps", type=float, default=4, help="Animation playback FPS (default: 4)"
     )
     args = parser.parse_args()
     main(args.lif_path, args.image_name, animate=args.animate, fps=args.fps)
