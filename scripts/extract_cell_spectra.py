@@ -47,6 +47,10 @@ MIN_TRACK_FRAMES = 5
 # final spectral output.  Dropped right before writing the CSV.
 _BTRACK_INTERNAL_COLS = ["x", "y", "z", "parent", "root", "state", "generation", "dummy"]
 
+# GLPK options for btrack optimiser: set time limit (tm_lim, ms) and
+# acceptable MIP gap for optimisation
+GLPK_OPTIONS = {"tm_lim": 120_000, "mip_gap": 0.01}
+
 
 def _track_cells(label_images: np.ndarray, config_path: Path = BTRACK_CONFIG) -> list[Tracklet]:
     """Run btrack on a stack of label images and return optimised tracks.
@@ -65,7 +69,10 @@ def _track_cells(label_images: np.ndarray, config_path: Path = BTRACK_CONFIG) ->
         tracker.configure(config_path)
         tracker.append(objects)
         tracker.track()
-        tracker.optimize()
+        # Pass GLPK options explicitly because tracker.optimize() with no args
+        # passes an empty dict, inadvertently overriding btrack's default
+        # tm_lim=60s with no time limit at all.
+        tracker.optimise(options=GLPK_OPTIONS)
         return tracker.tracks
 
 
