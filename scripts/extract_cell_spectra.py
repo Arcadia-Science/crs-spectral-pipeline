@@ -168,7 +168,7 @@ def _save_tracking_animation(
     animator = NapariAnimator(
         foreground=srs_intensities,
         tracks=tracks,
-        labels=cell_outlines,
+        outlines=cell_outlines,
         fps=fps,
     )
     animator.save_animation(mp4_path)

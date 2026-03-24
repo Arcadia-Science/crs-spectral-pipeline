@@ -1,7 +1,7 @@
 """Napari animation utilities for visualizing cell tracking across SRS frames.
 
-Creates MP4 animations showing image stacks with tracked cell overlays,
-useful for quality-checking cell tracking results.
+Creates MP4 animations showing image stacks with cell outline and track overlays,
+useful for quality-checking segmentation and tracking results.
 
 Adapted from https://github.com/Arcadia-Science/burt-lancaster
 """
@@ -30,13 +30,13 @@ class NapariAnimator:
     Args:
         foreground: 3D array (T, Y, X) of image intensities.
         tracks: btrack Tracklets to overlay. If empty/None, no tracks are shown.
-        labels: Optional 3D array (T, Y, X) of segmentation labels.
+        outlines: Optional 3D array (T, Y, X) of cell outline images.
         fps: Playback frames per second.
     """
 
     foreground: np.ndarray
     tracks: list[Tracklet] | None
-    labels: np.ndarray | None = None
+    outlines: np.ndarray | None = None
     fps: float = DEFAULT_FPS
 
     @property
@@ -79,9 +79,9 @@ class NapariAnimator:
         try:
             viewer.add_image(self.foreground, name="SRS")
 
-            if self.labels is not None:
+            if self.outlines is not None:
                 viewer.add_image(
-                    self.labels,
+                    self.outlines,
                     name="cell outlines",
                     blending="additive",
                     opacity=0.7,
