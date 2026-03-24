@@ -38,8 +38,10 @@ for i in "${!LIF_PATHS[@]}"; do
 done
 
 echo "═══  Done: $passed passed, $failed failed  ═══"
-for name in "${failed_names[@]}"; do
-    echo "  FAILED: $name"
-done
+if ((failed > 0)); then
+    for name in "${failed_names[@]}"; do
+        echo "  FAILED: $name"
+    done
+fi
 
 exit "$failed"
