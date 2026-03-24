@@ -49,7 +49,8 @@ def _track_cells(label_images: np.ndarray, config_path: Path = BTRACK_CONFIG) ->
 
 
 def _tracks_to_dataframe(
-    tracks: list[Tracklet], min_frames: int = MIN_TRACK_FRAMES
+    tracks: list[Tracklet],
+    min_frames: int = MIN_TRACK_FRAMES,
 ) -> pd.DataFrame:
     """Convert tracklets to a DataFrame, keeping only long-enough tracks."""
     dfs = [pd.DataFrame(t.to_dict()) for t in tracks if len(t) >= min_frames]
@@ -171,7 +172,7 @@ def process_fov(
     _btrack_only_cols = ["x", "y", "z", "parent", "root", "state", "generation", "dummy"]
     df_spectra = pd.concat([df, df_bg]).drop(columns=_btrack_only_cols, errors="ignore")
 
-    stem = f"{dataset_label}_M{m_index:03d}"
+    stem = f"SRS_M{m_index:03d}"
     output_dir.mkdir(parents=True, exist_ok=True)
     df_spectra.to_csv(output_dir / f"{stem}_spectra.csv", index=False)
 
