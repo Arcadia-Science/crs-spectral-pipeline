@@ -158,14 +158,17 @@ def _save_tracking_animation(
     fps: float,
 ) -> None:
     """Render a napari tracking animation for a single FOV."""
+    from cellpose.utils import masks_to_outlines
     from napari_utils import NapariAnimator  # lazy import; napari is optional
+
+    cell_outlines = masks_to_outlines(label_stack)
 
     output_dir.mkdir(parents=True, exist_ok=True)
     mp4_path = output_dir / f"SRS_M{m_index:03d}_tracking.mp4"
     animator = NapariAnimator(
         foreground=srs_intensities,
         tracks=tracks,
-        labels=label_stack,
+        labels=cell_outlines,
         fps=fps,
     )
     animator.save_animation(mp4_path)
