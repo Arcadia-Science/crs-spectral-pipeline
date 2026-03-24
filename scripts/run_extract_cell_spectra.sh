@@ -28,7 +28,7 @@ for i in "${!LIF_PATHS[@]}"; do
 
     echo "━━━  $label  ━━━"
 
-    if python "$SCRIPT" "$lif_path" "$image_name"; then
+    if python "$SCRIPT" "$lif_path" "$image_name" "$@"; then
         ((passed++))
     else
         ((failed++))
