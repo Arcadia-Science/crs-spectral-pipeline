@@ -153,7 +153,7 @@ def _extract_cell_spectra(
     wn_values: list[float] = []
     intensities: list[float] = []
     valid_idx: list[int] = []
-    n_oob = 0
+    n_oob = 0  # out of bounds counter
 
     for row in tqdm(df.itertuples(), total=len(df), desc="Extracting spectra"):
         frame_i = int(row.t)  # pyright: ignore[reportAttributeAccessIssue]
