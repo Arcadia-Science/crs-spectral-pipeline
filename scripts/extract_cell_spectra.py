@@ -51,17 +51,13 @@ _BTRACK_INTERNAL_COLS = ["x", "y", "z", "parent", "root", "state", "generation",
 def _track_cells(label_images: np.ndarray, config_path: Path = BTRACK_CONFIG) -> list[Tracklet]:
     """Run btrack on a stack of label images and return optimised tracks.
 
-    Parameters
-    ----------
-    label_images : np.ndarray
-        Integer label stack of shape ``(T, Y, X)`` where each 2-D slice is a
-        segmentation mask (0 = background).
-    config_path : Path
-        Path to the btrack JSON configuration (motion / hypothesis models).
+    Args:
+        label_images: Integer label stack of shape (T, Y, X) where each 2-D
+            slice is a segmentation mask (0 = background).
+        config_path: Path to the btrack JSON configuration (motion / hypothesis
+            models).
 
-    Returns
-    -------
-    list[Tracklet]
+    Returns:
         Optimised tracklets linking cell labels across frames.
     """
     objects = segmentation_to_objects(label_images)
@@ -79,19 +75,14 @@ def _tracks_to_dataframe(
 ) -> pd.DataFrame:
     """Convert tracklets to a tidy DataFrame, discarding short tracks.
 
-    Parameters
-    ----------
-    tracks : list[Tracklet]
-        Raw tracklets from :func:`_track_cells`.
-    min_frames : int
-        Minimum number of frames a track must span to be retained.  Short
-        tracks are usually segmentation artefacts or edge cells.
+    Args:
+        tracks: Raw tracklets from ``_track_cells``.
+        min_frames: Minimum number of frames a track must span to be retained.
+            Short tracks are usually segmentation artefacts or edge cells.
 
-    Returns
-    -------
-    pd.DataFrame
-        One row per (track, frame) pair.  Columns include ``ID``, ``t``,
-        ``x``, ``y``, and various btrack internals.
+    Returns:
+        One row per (track, frame) pair. Columns include ``ID``, ``t``, ``x``,
+        ``y``, and various btrack internals.
     """
     dfs = [pd.DataFrame(t.to_dict()) for t in tracks if len(t) >= min_frames]
     if not dfs:
@@ -104,19 +95,18 @@ def _filter_complete_tracks(
     t_min: int | None = None,
     t_max: int | None = None,
 ) -> pd.DataFrame:
-    """Keep only tracks that span every frame in ``[t_min, t_max]``.
+    """Keep only tracks that span every frame in [t_min, t_max].
 
     Cells that disappear mid-acquisition (due to segmentation dropouts or
     drifting out of the FOV) produce incomplete spectra that complicate
     downstream analysis, so they are discarded here.
 
-    Parameters
-    ----------
-    df : pd.DataFrame
-        Track DataFrame from :func:`_tracks_to_dataframe`.
-    t_min, t_max : int | None
-        Temporal window to require coverage over.  Defaults to the full
-        range present in the data.
+    Args:
+        df: Track DataFrame from ``_tracks_to_dataframe``.
+        t_min: Start of the temporal window to require coverage over.
+            Defaults to the minimum frame in the data.
+        t_max: End of the temporal window to require coverage over.
+            Defaults to the maximum frame in the data.
     """
     t_col = df["t"].to_numpy()
     if t_min is None:
@@ -147,21 +137,14 @@ def _extract_cell_spectra(
     Rows whose centroid falls on background (label == 0) or outside the image
     bounds are dropped — both situations indicate tracking artefacts.
 
-    Parameters
-    ----------
-    df : pd.DataFrame
-        Filtered track DataFrame (one row per cell per frame).
-    masks : list[SegmentationMask]
-        Per-frame segmentation masks, indexed by frame number.
-    srs_intensities : np.ndarray
-        SRS intensity stack of shape ``(T, Y, X)``.
-    wavenumbers : np.ndarray
-        Wavenumber (cm-1) for each frame, same length as *masks*.
+    Args:
+        df: Filtered track DataFrame (one row per cell per frame).
+        masks: Per-frame segmentation masks, indexed by frame number.
+        srs_intensities: SRS intensity stack of shape (T, Y, X).
+        wavenumbers: Wavenumber (cm-1) for each frame, same length as *masks*.
 
-    Returns
-    -------
-    pd.DataFrame
-        *df* subset augmented with ``label``, ``wavenumber_cm1``, and
+    Returns:
+        Subset of *df* augmented with ``label``, ``wavenumber_cm1``, and
         ``mean_srs_intensity`` columns.
     """
     img_h, img_w = masks[0].label_image.shape
@@ -287,24 +270,16 @@ def process_fov(
     Steps: load masks -> track cells -> (optionally animate) -> extract spectra
     -> append background -> write CSV + HTML.
 
-    Parameters
-    ----------
-    image : MicroscopyImage
-        The opened LIF image (all FOVs).
-    m_index : int
-        Which FOV (M-index) to process.
-    masks_path : Path
-        Path to the per-frame segmentation mask TIFF stack for this FOV.
-    wavenumbers : np.ndarray
-        Wavenumber values (cm-1), one per lambda frame.
-    output_dir : Path
-        Directory for CSV / HTML outputs (created if absent).
-    dataset_label : str
-        Human-readable prefix for the plot title.
-    animate : bool
-        If True, also render a napari tracking animation MP4.
-    fps : float
-        Playback FPS for the animation (ignored when *animate* is False).
+    Args:
+        image: The opened LIF image (all FOVs).
+        m_index: Which FOV (M-index) to process.
+        masks_path: Path to the per-frame segmentation mask TIFF stack for
+            this FOV.
+        wavenumbers: Wavenumber values (cm-1), one per lambda frame.
+        output_dir: Directory for CSV / HTML outputs (created if absent).
+        dataset_label: Human-readable prefix for the plot title.
+        animate: If True, also render a napari tracking animation MP4.
+        fps: Playback FPS for the animation (ignored when *animate* is False).
     """
     output_dir.mkdir(parents=True, exist_ok=True)
 
