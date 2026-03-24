@@ -149,6 +149,29 @@ def _make_figure(df: pd.DataFrame, title: str) -> Figure:
     return fig
 
 
+def _save_tracking_animation(
+    srs_intensities: np.ndarray,
+    tracks: list[Tracklet],
+    label_stack: np.ndarray,
+    output_dir: Path,
+    m_index: int,
+    fps: float,
+) -> None:
+    """Render a napari tracking animation for a single FOV."""
+    from napari_utils import NapariAnimator  # lazy import; napari is optional
+
+    output_dir.mkdir(parents=True, exist_ok=True)
+    mp4_path = output_dir / f"SRS_M{m_index:03d}_tracking.mp4"
+    animator = NapariAnimator(
+        foreground=srs_intensities,
+        tracks=tracks,
+        labels=label_stack,
+        fps=fps,
+    )
+    animator.save_animation(mp4_path)
+    print(f"  Saved {mp4_path.name}")
+
+
 def process_fov(
     image: MicroscopyImage,
     m_index: int,
@@ -156,8 +179,13 @@ def process_fov(
     wavenumbers: np.ndarray,
     output_dir: Path,
     dataset_label: str,
+    *,
+    animate: bool = False,
+    fps: float = 10,
 ) -> None:
     """Full extraction pipeline for a single FOV (M-index)."""
+    output_dir.mkdir(parents=True, exist_ok=True)
+
     masks_raw = ski.io.imread(masks_path)
     masks = [SegmentationMask(m) for m in masks_raw]
     label_stack = np.array([m.label_image for m in masks])
@@ -165,6 +193,17 @@ def process_fov(
     srs_intensities = image.get_intensities_from_channel("SRS")[m_index]
 
     tracks = _track_cells(label_stack)
+
+    if animate:
+        _save_tracking_animation(
+            srs_intensities,
+            tracks,
+            label_stack,
+            output_dir.parent,
+            m_index,
+            fps,
+        )
+
     df = _tracks_to_dataframe(tracks)
     df = _filter_complete_tracks(df)
     df = _extract_cell_spectra(df, masks, srs_intensities, wavenumbers)
@@ -173,7 +212,6 @@ def process_fov(
     df_spectra = pd.concat([df, df_bg]).drop(columns=_btrack_only_cols, errors="ignore")
 
     stem = f"SRS_M{m_index:03d}"
-    output_dir.mkdir(parents=True, exist_ok=True)
     df_spectra.to_csv(output_dir / f"{stem}_spectra.csv", index=False)
 
     fig = _make_figure(df_spectra, f"{dataset_label} M{m_index:03d} cell spectra")
@@ -181,7 +219,13 @@ def process_fov(
     print(f"  Saved {stem}_spectra.csv and {stem}_spectra.html")
 
 
-def main(lif_path: Path, image_name: str) -> None:
+def main(
+    lif_path: Path,
+    image_name: str,
+    *,
+    animate: bool = False,
+    fps: float = 10,
+) -> None:
     processed_dir = lif_path.parent / "processed" / lif_path.stem / image_name
     masks_paths = natsorted(processed_dir.glob("*masks.tiff"))
     if not masks_paths:
@@ -200,7 +244,7 @@ def main(lif_path: Path, image_name: str) -> None:
     dataset_label = f"{lif_path.parent.name}_{lif_path.stem}"
     output_dir = processed_dir / "spectra"
 
-    for masks_path in masks_paths:
+    for masks_path in masks_paths[:1]:
         m_match = re.search(r"M(\d+)", masks_path.stem)
         if m_match is None:
             print(f"  Skipping {masks_path.name}: could not parse M-index")
@@ -208,7 +252,16 @@ def main(lif_path: Path, image_name: str) -> None:
         m_index = int(m_match.group(1))
         print(f"Processing FOV M{m_index:03d} ({masks_path.name})...")
         try:
-            process_fov(image, m_index, masks_path, wavenumbers, output_dir, dataset_label)
+            process_fov(
+                image,
+                m_index,
+                masks_path,
+                wavenumbers,
+                output_dir,
+                dataset_label,
+                animate=animate,
+                fps=fps,
+            )
         except Exception as e:
             print(f"  Skipping FOV M{m_index:03d}: {type(e).__name__}: {e}")
 
@@ -217,5 +270,13 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("lif_path", type=Path, help="Path to the .lif file")
     parser.add_argument("image_name", type=str, help="Image series name inside the LIF")
+    parser.add_argument(
+        "--animate",
+        action="store_true",
+        help="Save a napari tracking animation (MP4) for each FOV",
+    )
+    parser.add_argument(
+        "--fps", type=float, default=10, help="Animation playback FPS (default: 10)"
+    )
     args = parser.parse_args()
-    main(args.lif_path, args.image_name)
+    main(args.lif_path, args.image_name, animate=args.animate, fps=args.fps)
