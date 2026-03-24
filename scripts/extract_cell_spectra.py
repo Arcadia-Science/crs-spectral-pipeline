@@ -15,6 +15,7 @@ from __future__ import annotations
 import argparse
 import re
 from pathlib import Path
+from typing import cast
 
 import btrack
 import numpy as np
@@ -66,15 +67,16 @@ def _filter_complete_tracks(
 
     Defaults to the full temporal range present in the data.
     """
+    t_col = df["t"].to_numpy()
     if t_min is None:
-        t_min = int(df["t"].min())
+        t_min = int(t_col.min())
     if t_max is None:
-        t_max = int(df["t"].max())
+        t_max = int(t_col.max())
     expected_frames = t_max - t_min + 1
-    df = df[(df["t"] >= t_min) & (df["t"] <= t_max)]
-    counts = df.groupby("ID")["t"].nunique()
-    complete_ids = counts[counts == expected_frames].index
-    return df.loc[df["ID"].isin(complete_ids)]
+    df = cast(pd.DataFrame, df[(df["t"] >= t_min) & (df["t"] <= t_max)])
+    counts = cast(pd.Series, df.groupby("ID")["t"].nunique())
+    complete_ids = cast(pd.Series, counts[counts == expected_frames]).index.tolist()
+    return cast(pd.DataFrame, df.loc[df["ID"].isin(complete_ids)])
 
 
 def _extract_cell_spectra(
@@ -87,22 +89,22 @@ def _extract_cell_spectra(
 
     Rows whose centroid falls on background (label == 0) are dropped.
     """
-    frame_indices: list[int] = []
     labels: list[int] = []
     wn_values: list[float] = []
     intensities: list[float] = []
     valid_idx: list = []
 
     for idx, row in tqdm(df.iterrows(), total=len(df), desc="Extracting spectra"):
-        frame_i = int(row["t"])
-        label = int(masks[frame_i].label_image[round(row["y"]), round(row["x"])])
+        frame_i = int(cast(float, row["t"]))
+        y_idx = round(cast(float, row["y"]))
+        x_idx = round(cast(float, row["x"]))
+        label = int(masks[frame_i].label_image[y_idx, x_idx])
 
         if label == 0:
             continue
 
         cell_mask = masks[frame_i].label_image == label
         valid_idx.append(idx)
-        frame_indices.append(frame_i)
         labels.append(label)
         wn_values.append(float(wavenumbers[frame_i]))
         intensities.append(float(srs_intensities[frame_i][cell_mask].mean()))
@@ -112,7 +114,6 @@ def _extract_cell_spectra(
         print(f"  Warning: {n_skipped}/{len(df)} centroids fell on background, skipped")
 
     result = df.loc[valid_idx].copy()
-    result["frame_i"] = frame_indices
     result["label"] = labels
     result["wavenumber_cm1"] = wn_values
     result["mean_srs_intensity"] = intensities
@@ -133,7 +134,6 @@ def _background_spectra(
                 "ID": BACKGROUND_ID,
                 "label": 0,
                 "t": frame_i,
-                "frame_i": frame_i,
                 "wavenumber_cm1": wavenumbers[frame_i],
                 "mean_srs_intensity": float(intensities[bg_mask].mean()),
             }
@@ -168,7 +168,8 @@ def process_fov(
     df = _filter_complete_tracks(df)
     df = _extract_cell_spectra(df, masks, srs_intensities, wavenumbers)
     df_bg = _background_spectra(masks, srs_intensities, wavenumbers)
-    df_spectra = pd.concat([df, df_bg])
+    _btrack_only_cols = ["x", "y", "z", "parent", "root", "state", "generation", "dummy"]
+    df_spectra = pd.concat([df, df_bg]).drop(columns=_btrack_only_cols, errors="ignore")
 
     stem = f"{dataset_label}_M{m_index:03d}"
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -193,7 +194,7 @@ def main(lif_path: Path, image_name: str) -> None:
     ].measured.w_values_nm
     if wavelengths_nm is None:
         raise ValueError("Wavelengths not found in metadata")
-    wavenumbers = calculate_raman_shift(wavelengths_nm)
+    wavenumbers = np.asarray(calculate_raman_shift(wavelengths_nm))
 
     dataset_label = f"{lif_path.parent.name}_{lif_path.stem}"
     output_dir = processed_dir / "spectra"
