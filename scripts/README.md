@@ -4,16 +4,10 @@ Processing pipeline for extracting single-cell SRS (stimulated Raman scattering)
 
 ## Pipeline overview
 
-```
-LIF file
-  │
-  ▼
-srs_segmentation.py          ← Stage 1: segment cells (runs on Modal with GPU)
-  │  outputs: per-FOV mask TIFFs, QC overlays, measurement CSVs
-  ▼
-extract_cell_spectra.py       ← Stage 2: track cells & extract spectra (runs locally)
-     outputs: per-FOV spectral CSVs, interactive Plotly HTML plots, optional MP4 animations
-```
+1. Upload raw LIF files to S3.
+2. `run_srs_segmentation.sh` — Cellpose segmentation on Modal (GPU). Reads LIF files from S3, writes mask TIFFs and QC outputs to S3.
+3. Sync processed results from S3 back to local machine.
+4. `run_extract_cell_spectra.sh` — Cell tracking and spectral extraction (local). Reads LIF files and masks locally, writes per-FOV spectral CSVs, interactive Plotly HTML plots, and optional MP4 animations.
 
 ## Scripts
 
