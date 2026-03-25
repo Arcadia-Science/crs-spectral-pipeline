@@ -255,8 +255,7 @@ def run_pipeline(
     for lif_path, image_name in lif_path_image_name_mapping.items():
         try:
             print(
-                f"Splitting LIF: FOV={fov_range}, Lambda={lambda_range}, "
-                f"channels={channel_names}"
+                f"Splitting LIF: FOV={fov_range}, Lambda={lambda_range}, channels={channel_names}"
             )
             tiff_paths, pixel_size_um = split_lif_file.remote(
                 lif_path, image_name, fov_range, lambda_range, channel_names
