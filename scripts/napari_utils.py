@@ -82,6 +82,7 @@ class NapariAnimator:
         viewer.scale_bar.visible = True
         viewer.scale_bar.unit = "um"
         viewer.scale_bar.font_size = 12
+        viewer.scale_bar.length = 10
 
     def _configure_wavenumber_overlay(self, viewer: napari.Viewer) -> None:
         """Set up a text overlay that updates with the current wavenumber."""
