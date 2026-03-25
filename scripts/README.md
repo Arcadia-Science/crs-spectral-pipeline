@@ -23,13 +23,13 @@ Processing pipeline for extracting single-cell SRS (stimulated Raman scattering)
 
 ## Commands used to process the publication data
 
-### Stage 1 — Segmentation
+### Stage 1 — Run cell segmentation
 
 ```bash
 bash scripts/run_srs_segmentation.sh --fov-range 0,9 --channel-names "E-CARS"
 ```
 
-### Stage 2 — Spectral extraction
+### Stage 2 — Run cell tracking and extract spectra
 
 ```bash
 bash scripts/run_extract_cell_spectra.sh --animate --fps 5 --patch-btrack
