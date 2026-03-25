@@ -4,12 +4,16 @@ set -uo pipefail
 SCRIPT="$(cd "$(dirname "$0")" && pwd)/srs_segmentation.py"
 
 LIF_PATHS=(
-    "The_Borg/Tara/2026-03-20/ED666_BY4741_unlabeled.lif"
-    "The_Borg/Tara/2026-03-20/SP286_BY4741_unlabeled.lif"
+    "The_Borg/Tara/2026-03-05/Chlorella_WT_Bristol_slide1.lif"
+    "The_Borg/Tara/2026-03-05/Chlorella_WT_Bristol_slide2.lif"
+    "The_Borg/Tara/2026-03-09/Chlorella_WT_TAP_slide1.lif"
+    "The_Borg/Tara/2026-03-09/Chlorella_WT_TAP_slide2.lif"
 )
 IMAGE_NAMES=(
-    "Lambda_3100_2800_SRS_CARS_Nav1"
-    "Lambda_3100_2800_SRS_CARS_Nav1"
+    "Lambda_SRS_CARS_1800_600_1pt0_Nav1"
+    "Lambda_SRS_CARS_1800_600_1pt0_Nav1"
+    "Lambda_1800_600_1pt0_Nav2"
+    "Lambda_1800_600_1pt0_Nav1"
 )
 
 # Join arrays into comma-separated strings for the Modal entrypoint.
