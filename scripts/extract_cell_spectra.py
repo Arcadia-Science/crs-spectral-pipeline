@@ -364,7 +364,7 @@ def main(
     passed = 0
     failed_fovs: list[str] = []
 
-    for masks_path in masks_paths[1:2]:
+    for masks_path in masks_paths:
         m_match = re.search(r"M(\d+)", masks_path.stem)
         if m_match is None:
             print(f"  Skipping {masks_path.name}: could not parse M-index")
