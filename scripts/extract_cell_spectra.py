@@ -13,6 +13,13 @@ Outputs (written to ``<processed_dir>/spectra/``):
     - ``SRS_M<nnn>_spectra.csv``  — columns: ID, t, wavenumber_cm1, mean_srs_intensity, …
     - ``SRS_M<nnn>_spectra.html`` — interactive line chart (one trace per cell + background)
 
+Note on indexing:
+    Lambda indices and Raman-shift wavenumbers run in opposite directions:
+    as the lambda index increases, the wavenumber (cm-1) decreases.  The
+    ``--lambda-range`` argument operates on the lambda index, so
+    ``--lambda-range 5,95`` keeps lambda frames 5..94 (and the corresponding
+    wavenumber window is the *reverse* of that slice).
+
 Usage:
     python scripts/extract_cell_spectra.py \\
         /path/to/file.lif "Lambda_SRS_CARS_1800_600_1pt0_Nav1"
@@ -49,7 +56,7 @@ _BTRACK_INTERNAL_COLS = ["x", "y", "z", "parent", "root", "state", "generation",
 
 # GLPK options for btrack optimiser: set time limit (tm_lim, ms) and
 # acceptable MIP gap for optimisation
-GLPK_OPTIONS: dict[str, object] = {"tm_lim": 120_000, "mip_gap": 0.003}
+GLPK_OPTIONS: dict[str, object] = {"tm_lim": 30_000, "mip_gap": 0.003}
 
 
 def _track_cells(label_images: np.ndarray, config_path: Path = BTRACK_CONFIG) -> list[Tracklet]:
@@ -271,6 +278,7 @@ def process_fov(
     output_dir: Path,
     dataset_label: str,
     *,
+    lambda_range: tuple[int, int] | None = None,
     animate: bool = False,
     fps: float = 10,
 ) -> None:
@@ -287,6 +295,7 @@ def process_fov(
         wavenumbers: Wavenumber values (cm-1), one per lambda frame.
         output_dir: Directory for CSV / HTML outputs (created if absent).
         dataset_label: Human-readable prefix for the plot title.
+        lambda_range: Optional (start, stop) slice into the lambda dimension.
         animate: If True, also render a napari tracking animation MP4.
         fps: Playback FPS for the animation (ignored when *animate* is False).
     """
@@ -297,6 +306,28 @@ def process_fov(
     label_stack = np.array([m.label_image for m in masks])
 
     srs_intensities = image.get_intensities_from_channel("SRS")[m_index]
+
+    if lambda_range is not None:
+        l_slice = slice(*lambda_range)
+        # If masks span the full (un-cropped) lambda range, slice them too
+        if label_stack.shape[0] == srs_intensities.shape[0]:
+            masks = masks[l_slice]
+            label_stack = label_stack[l_slice]
+        srs_intensities = srs_intensities[l_slice]
+        wavenumbers = wavenumbers[l_slice]
+
+    n_masks = label_stack.shape[0]
+    n_srs = srs_intensities.shape[0]
+    print(
+        f"  Frames: masks={n_masks}, srs={n_srs}, wn={wavenumbers.shape[0]} "
+        f"(lambda_range={lambda_range})"
+    )
+    if n_masks != n_srs:
+        raise ValueError(
+            f"Frame count mismatch: masks have {n_masks} frames but SRS has {n_srs} "
+            f"(after lambda_range={lambda_range} slice). The masks appear to have been "
+            f"segmented with a different lambda range."
+        )
 
     tracks = _track_cells(label_stack)
 
@@ -332,6 +363,7 @@ def main(
     lif_path: Path,
     image_name: str,
     *,
+    lambda_range: tuple[int, int] | None = None,
     animate: bool = False,
     fps: float = 10,
 ) -> None:
@@ -379,6 +411,7 @@ def main(
                 wavenumbers,
                 output_dir,
                 dataset_label,
+                lambda_range=lambda_range,
                 animate=animate,
                 fps=fps,
             )
@@ -393,12 +426,29 @@ def main(
         print(f"  Failed: {', '.join(failed_fovs)}")
 
 
+def _parse_range(value: str) -> tuple[int, int]:
+    """Parse a 'start,stop' string into a two-element integer tuple."""
+    parts = value.split(",")
+    if len(parts) != 2:
+        raise ValueError(f"Expected 'start,stop', got '{value}'")
+    return int(parts[0]), int(parts[1])
+
+
 if __name__ == "__main__":
     from btrack_patches import patch_optimiser
 
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("lif_path", type=Path, help="Path to the .lif file")
     parser.add_argument("image_name", type=str, help="Image series name inside the LIF")
+    parser.add_argument(
+        "--lambda-range",
+        type=_parse_range,
+        default=None,
+        metavar="START,STOP",
+        help="Lambda index range (start,stop) to crop SRS intensities and wavenumbers "
+        "so they align with masks segmented on a cropped lambda range. "
+        "Note: lambda indices run inversely to wavenumber (cm-1)",
+    )
     parser.add_argument(
         "--animate",
         action="store_true",
@@ -418,4 +468,10 @@ if __name__ == "__main__":
     if args.patch_btrack:
         patch_optimiser()
 
-    main(args.lif_path, args.image_name, animate=args.animate, fps=args.fps)
+    main(
+        args.lif_path,
+        args.image_name,
+        lambda_range=args.lambda_range,
+        animate=args.animate,
+        fps=args.fps,
+    )
