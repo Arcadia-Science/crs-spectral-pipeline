@@ -103,7 +103,7 @@ def split_lif_file(
     return tiff_paths, pixel_size_um
 
 
-@app.function(image=image, gpu="T4", volumes={"/s3": s3_mount}, max_containers=10, timeout=900)
+@app.function(image=image, gpu="T4", volumes={"/s3": s3_mount}, max_containers=10, timeout=1800)
 def segment_stack(s3_path: str, pixel_size_um: float) -> tuple[str, int | None, str | None]:
     """Segment all frames in a stack and persist QC/measurement outputs.
 
@@ -171,7 +171,9 @@ def segment_stack(s3_path: str, pixel_size_um: float) -> tuple[str, int | None, 
                 overlay_rgb_float,
                 out_range=np.uint8,  # pyright: ignore[reportArgumentType]
             )
-            jpg_path = stack_path.with_name(f"{stem}_{i}_overlay.jpg")
+            output_dir = stack_path.parent / "overlays"
+            output_dir.mkdir(parents=True, exist_ok=True)
+            jpg_path = output_dir / f"{stem}_{i}_overlay.jpg"
             _write_via_temp(
                 jpg_path,
                 ".jpg",
@@ -184,7 +186,9 @@ def segment_stack(s3_path: str, pixel_size_um: float) -> tuple[str, int | None, 
                 pixel_size_um=pixel_size_um
             )
             dataframe = pd.DataFrame.from_dict(cell_properties_um)
-            csv_path = stack_path.with_name(f"{stem}_{i}_measurements.csv")
+            output_dir = stack_path.parent / "measurements"
+            output_dir.mkdir(parents=True, exist_ok=True)
+            csv_path = output_dir / f"{stem}_{i}_measurements.csv"
             _write_via_temp(
                 csv_path,
                 ".csv",
@@ -214,7 +218,7 @@ def segment_stack(s3_path: str, pixel_size_um: float) -> tuple[str, int | None, 
         return s3_path, None, msg
 
 
-@app.function(image=image, volumes={"/s3": s3_mount}, timeout=1800)
+@app.function(image=image, volumes={"/s3": s3_mount}, timeout=3600)
 def run_pipeline(
     lif_path_image_name_mapping: dict[str, str],
     m_range: tuple[int, int] | None,
@@ -243,31 +247,51 @@ def run_pipeline(
             traceback.print_exc()
 
 
+def _parse_range(value: str) -> tuple[int, int]:
+    """Parse a 'start,stop' string into a two-element integer tuple."""
+    parts = value.split(",")
+    if len(parts) != 2:
+        raise ValueError(f"Expected 'start,stop', got '{value}'")
+    return int(parts[0]), int(parts[1])
+
+
 @app.local_entrypoint()
-def main() -> None:
+def main(
+    lif_paths: str,
+    image_names: str,
+    m_range: str | None = None,
+    lambda_range: str | None = None,
+    channel_names: str | None = None,
+) -> None:
     """Orchestrate LIF splitting and stack segmentation runs.
 
     For each configured LIF/image pair, this entrypoint first writes split TIFF
     stacks, then dispatches segmentation across stacks with Modal starmap.
-    """
-    lif_path_image_name_mapping: dict[str, str] = {
-        "The_Borg/Tara/2026-03-05/Chlorella_WT_Bristol_slide1.lif": (
-            "Lambda_SRS_CARS_1800_600_1pt0_Nav1"
-        ),
-        "The_Borg/Tara/2026-03-05/Chlorella_WT_Bristol_slide2.lif": (
-            "Lambda_SRS_CARS_1800_600_1pt0_Nav1"
-        ),
-        "The_Borg/Tara/2026-03-09/Chlorella_WT_TAP_slide1.lif": "Lambda_1800_600_1pt0_Nav2",
-        "The_Borg/Tara/2026-03-09/Chlorella_WT_TAP_slide2.lif": "Lambda_1800_600_1pt0_Nav1",
-    }
 
-    m_range = (0, 9)  # least common denominator M range
-    lambda_range = None  # None for full lambda range
-    channel_names = ["E-CARS"]
+    Args:
+        lif_paths: Comma-separated S3-relative LIF paths.
+        image_names: Comma-separated image series names (same order as lif_paths).
+        m_range: Optional 'start,stop' M-index range (e.g. '0,9').
+        lambda_range: Optional 'start,stop' lambda range.
+        channel_names: Optional comma-separated channel names to keep.
+    """
+    lif_list = [p.strip() for p in lif_paths.split(",")]
+    name_list = [n.strip() for n in image_names.split(",")]
+    if len(lif_list) != len(name_list):
+        raise ValueError(
+            f"Mismatched counts: {len(lif_list)} LIF paths vs {len(name_list)} image names"
+        )
+
+    lif_path_image_name_mapping = dict(zip(lif_list, name_list, strict=True))
+    parsed_m = _parse_range(m_range) if m_range is not None else None
+    parsed_lambda = _parse_range(lambda_range) if lambda_range is not None else None
+    parsed_channels = (
+        [c.strip() for c in channel_names.split(",")] if channel_names is not None else None
+    )
 
     run_pipeline.remote(
         lif_path_image_name_mapping,
-        m_range,
-        lambda_range,
-        channel_names,
+        parsed_m,
+        parsed_lambda,
+        parsed_channels,
     )
