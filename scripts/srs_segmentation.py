@@ -1,3 +1,29 @@
+"""Segment cells in SRS lambda-scan LIF images using Modal for parallelism.
+
+For each configured LIF/image-name pair, this script:
+    1. Splits a multi-FOV, multi-lambda LIF image series into per-FOV TIFF
+       stacks (one stack per channel per FOV).
+    2. Preprocesses each stack (Gaussian blur, adaptive histogram equalisation,
+       difference-of-Gaussians background subtraction).
+    3. Runs Cellpose segmentation on every frame, saving per-frame QC overlays,
+       cell-property CSVs, and a full mask TIFF stack.
+
+Splitting runs on a single Modal container; segmentation fans out across up
+to 10 GPU containers via ``starmap``.
+
+Outputs (written to ``<lif_parent>/processed/<lif_stem>/<image_name>/``):
+    - ``<channel>_M<nnn>.tiff``         — per-FOV intensity stack
+    - ``<channel>_M<nnn>_masks.tiff``   — per-FOV label-image stack
+    - ``overlays/<stem>_<i>_overlay.jpg`` — QC overlay per frame
+    - ``measurements/<stem>_<i>_measurements.csv`` — cell properties per frame
+
+Usage:
+    modal run scripts/srs_segmentation.py \\
+        --lif-paths "path/to/file1.lif,path/to/file2.lif" \\
+        --image-names "Lambda_SRS_CARS_Nav1,Lambda_SRS_CARS_Nav1" \\
+        --fov-range 0,9 --lambda-range 5,95 --channel-names "E-CARS"
+"""
+
 from __future__ import annotations
 import shutil
 import tempfile
@@ -37,14 +63,14 @@ def _write_via_temp(dest: str | Path, suffix: str, writer: Callable[[str], None]
 def split_lif_file(
     lif_path: str,
     image_name: str,
-    m_range: tuple[int, int] | None = None,
+    fov_range: tuple[int, int] | None = None,
     lambda_range: tuple[int, int] | None = None,
     channel_names: list[str] | None = None,
 ) -> tuple[list[str], float]:
-    """Split a LIF image series into per-M TIFF stacks.
+    """Split a LIF image series into per-FOV TIFF stacks.
 
     The function loads one image series, optionally filters channels, applies
-    optional M and lambda slicing, and writes one TIFF stack per M index.
+    optional FOV and lambda slicing, and writes one TIFF stack per FOV index.
 
     Returns:
         A tuple of (written_tiff_paths, pixel_size_um).
@@ -78,16 +104,16 @@ def split_lif_file(
         print(f"Channel '{channel.name}' raw shape: {intensities.shape}")
 
         # Apply optional crop windows while preserving full-range defaults.
-        m_slice = slice(*m_range) if m_range is not None else slice(None)
+        fov_slice = slice(*fov_range) if fov_range is not None else slice(None)
         l_slice = slice(*lambda_range) if lambda_range is not None else slice(None)
-        cropped = intensities[m_slice, l_slice, :, :]
+        cropped = intensities[fov_slice, l_slice, :, :]
 
-        m_start = m_range[0] if m_range is not None else 0
+        fov_start = fov_range[0] if fov_range is not None else 0
         print(f"Channel '{channel.name}' cropped shape: {cropped.shape}")
 
-        for m_idx in range(cropped.shape[0]):
-            stack = cropped[m_idx]
-            filename = f"{channel.name}_M{m_start + m_idx:03d}.tiff"
+        for fov_idx in range(cropped.shape[0]):
+            stack = cropped[fov_idx]
+            filename = f"{channel.name}_M{fov_start + fov_idx:03d}.tiff"
             output_path = output_dir / filename
 
             _write_via_temp(
@@ -221,16 +247,19 @@ def segment_stack(s3_path: str, pixel_size_um: float) -> tuple[str, int | None, 
 @app.function(image=image, volumes={"/s3": s3_mount}, timeout=3600)
 def run_pipeline(
     lif_path_image_name_mapping: dict[str, str],
-    m_range: tuple[int, int] | None,
+    fov_range: tuple[int, int] | None,
     lambda_range: tuple[int, int] | None,
     channel_names: list[str] | None,
 ) -> None:
     """Run split + segmentation over all configured LIF/image pairs."""
     for lif_path, image_name in lif_path_image_name_mapping.items():
         try:
-            print(f"Splitting LIF: M={m_range}, Lambda={lambda_range}, channels={channel_names}")
+            print(
+                f"Splitting LIF: FOV={fov_range}, Lambda={lambda_range}, "
+                f"channels={channel_names}"
+            )
             tiff_paths, pixel_size_um = split_lif_file.remote(
-                lif_path, image_name, m_range, lambda_range, channel_names
+                lif_path, image_name, fov_range, lambda_range, channel_names
             )
             print(f"\nSegmenting {len(tiff_paths)} stacks in parallel...")
 
@@ -259,7 +288,7 @@ def _parse_range(value: str) -> tuple[int, int]:
 def main(
     lif_paths: str,
     image_names: str,
-    m_range: str | None = None,
+    fov_range: str | None = None,
     lambda_range: str | None = None,
     channel_names: str | None = None,
 ) -> None:
@@ -271,8 +300,9 @@ def main(
     Args:
         lif_paths: Comma-separated S3-relative LIF paths.
         image_names: Comma-separated image series names (same order as lif_paths).
-        m_range: Optional 'start,stop' M-index range (e.g. '0,9').
-        lambda_range: Optional 'start,stop' lambda range.
+        fov_range: Optional 'start,stop' field-of-view index range (e.g. '0,9').
+        lambda_range: Optional 'start,stop' lambda index range.  Note that
+            lambda indices run inversely to wavenumber (cm-1).
         channel_names: Optional comma-separated channel names to keep.
     """
     lif_list = [p.strip() for p in lif_paths.split(",")]
@@ -283,7 +313,7 @@ def main(
         )
 
     lif_path_image_name_mapping = dict(zip(lif_list, name_list, strict=True))
-    parsed_m = _parse_range(m_range) if m_range is not None else None
+    parsed_fov = _parse_range(fov_range) if fov_range is not None else None
     parsed_lambda = _parse_range(lambda_range) if lambda_range is not None else None
     parsed_channels = (
         [c.strip() for c in channel_names.split(",")] if channel_names is not None else None
@@ -291,7 +321,7 @@ def main(
 
     run_pipeline.remote(
         lif_path_image_name_mapping,
-        parsed_m,
+        parsed_fov,
         parsed_lambda,
         parsed_channels,
     )
