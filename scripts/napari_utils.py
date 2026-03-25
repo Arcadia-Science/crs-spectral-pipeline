@@ -38,6 +38,8 @@ class NapariAnimator:
     tracks: list[Tracklet] | None
     outlines: np.ndarray | None = None
     fps: float = DEFAULT_FPS
+    wavenumbers: np.ndarray | None = None
+    pixel_size_um: float | None = None
 
     @property
     def num_frames(self) -> int:
@@ -73,11 +75,39 @@ class NapariAnimator:
         _napari_tracks, _properties, _graph = tracks_to_napari(self.tracks)
         return _napari_tracks
 
+    def _configure_scale_bar(self, viewer: napari.Viewer) -> None:
+        """Enable a physical scale bar when pixel_size_um is known."""
+        if self.pixel_size_um is None:
+            return
+        viewer.scale_bar.visible = True
+        viewer.scale_bar.unit = "um"
+        viewer.scale_bar.font_size = 12
+
+    def _configure_wavenumber_overlay(self, viewer: napari.Viewer) -> None:
+        """Set up a text overlay that updates with the current wavenumber."""
+        if self.wavenumbers is None:
+            return
+
+        wavenumbers = self.wavenumbers
+
+        def _update_text(event: object) -> None:
+            frame_idx = int(viewer.dims.current_step[0])
+            viewer.text_overlay.text = f"{wavenumbers[frame_idx]:.0f} cm\u207b\u00b9"
+
+        viewer.text_overlay.visible = True
+        viewer.text_overlay.font_size = 12
+        viewer.text_overlay.position = "top_left"
+        viewer.text_overlay.color = "white"
+        viewer.dims.events.current_step.connect(_update_text)
+        _update_text(None)
+
     def save_animation(self, mp4_path: Path) -> None:
         """Create and save a napari animation to an MP4 file."""
         viewer = napari.Viewer(show=True)
         try:
-            viewer.add_image(self.foreground, name="SRS")
+            scale = (1, self.pixel_size_um, self.pixel_size_um) if self.pixel_size_um else None
+
+            viewer.add_image(self.foreground, name="SRS", scale=scale)
 
             if self.outlines is not None:
                 viewer.add_image(
@@ -86,10 +116,14 @@ class NapariAnimator:
                     blending="additive",
                     opacity=0.7,
                     colormap="green",
+                    scale=scale,
                 )
 
             if self.napari_tracks is not None:
-                viewer.add_tracks(self.napari_tracks, name="tracks")
+                viewer.add_tracks(self.napari_tracks, name="tracks", scale=scale)
+
+            self._configure_scale_bar(viewer)
+            self._configure_wavenumber_overlay(viewer)
 
             # Resize the window so the canvas matches the image pixel dimensions.
             viewer.window.resize(self.window_width_px, self.window_height_px)

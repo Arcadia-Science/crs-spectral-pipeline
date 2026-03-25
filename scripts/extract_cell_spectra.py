@@ -240,6 +240,8 @@ def _save_tracking_animation(
     output_dir: Path,
     m_index: int,
     fps: float,
+    wavenumbers: np.ndarray | None = None,
+    pixel_size_um: float | None = None,
 ) -> None:
     """Render a napari tracking animation for a single FOV."""
     from cellpose.utils import masks_to_outlines
@@ -254,6 +256,8 @@ def _save_tracking_animation(
         tracks=tracks,
         outlines=cell_outlines,
         fps=fps,
+        wavenumbers=wavenumbers,
+        pixel_size_um=pixel_size_um,
     )
     animator.save_animation(mp4_path)
     print(f"  Saved {mp4_path.name}")
@@ -297,6 +301,8 @@ def process_fov(
     tracks = _track_cells(label_stack)
 
     if animate:
+        pixel_size_um = image.metadata.instrument.channel_metadata_list[0].resolution.xy_step_um
+        print(f"Pixel size: {pixel_size_um:.3f} um/pixel")
         _save_tracking_animation(
             srs_intensities,
             tracks,
@@ -304,6 +310,8 @@ def process_fov(
             output_dir.parent,
             m_index,
             fps,
+            wavenumbers=wavenumbers,
+            pixel_size_um=pixel_size_um,
         )
 
     df = _tracks_to_dataframe(tracks)
@@ -356,7 +364,7 @@ def main(
     passed = 0
     failed_fovs: list[str] = []
 
-    for masks_path in masks_paths:
+    for masks_path in masks_paths[1:2]:
         m_match = re.search(r"M(\d+)", masks_path.stem)
         if m_match is None:
             print(f"  Skipping {masks_path.name}: could not parse M-index")
