@@ -16,7 +16,7 @@ cd 2026-single-cell-crs-phenotyping
 uv venv --python 3.12
 source .venv/bin/activate
 uv sync --all-extras
-uv pip install pyqt6 "napari[all]"
+uv pip install pyqt6 "napari[all]" napari-animation
 ```
 
 
