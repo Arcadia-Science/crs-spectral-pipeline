@@ -1,7 +1,7 @@
 [project]
-name = "2026-single-cell-crs-phenotyping"
+name = "crs-spectral-pipeline"
 version = "0.1.0"
-description = "Analysis pipelines associated with the pub: 'Designing coherent Raman imaging experiments for high-dimensional single-cell phenotyping'"
+description = "Pipeline for single-cell CRS spectral extraction: segmentation, tracking, and per-cell spectra from hyperspectral Raman microscopy data"
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
